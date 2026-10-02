@@ -39,7 +39,9 @@
 
 #include <memory>
 
-#define MAX_SPELL_ID 60000
+// Turtle's client already ships spells above 60000 (61000, 61001), and custom
+// module spells live there too (Thrill of the Kill is 61500).
+#define MAX_SPELL_ID 100000
 
 // For Plainsrunning hackfixes:
 
