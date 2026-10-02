@@ -1,0 +1,26 @@
+###################################################################################################
+# mod-thrill-of-the-kill module configuration
+#
+# Every kill grants a stack of "Thrill of the Kill": +1% damage done per stack,
+# up to 10 stacks. Lasts 60 seconds and is refreshed by every new kill.
+###################################################################################################
+
+[ModuleConf]
+
+#    ThrillOfTheKill.Enable
+#        Grant the buff on kills.
+#        Default: 1
+
+ThrillOfTheKill.Enable = 1
+
+#    ThrillOfTheKill.CountPvPKills
+#        Honorable player kills also grant a stack.
+#        Default: 1
+
+ThrillOfTheKill.CountPvPKills = 1
+
+#    ThrillOfTheKill.RequireXPOrHonor
+#        Only kills that would award experience or honor count (no grey mobs, critters, totems or pets).
+#        Default: 1
+
+ThrillOfTheKill.RequireXPOrHonor = 1
