@@ -167,3 +167,11 @@ Two small patches in this fork, both generic:
 - Exploration, quests and flight paths are watched by cheap signatures every `SyncIntervalMs`;
   kills come from the kill-credit hook.
 - Bots from bot modules are not tracked (`SkipBots`).
+- A pending admin reset is stored as milestone `(zone_id=0, percent=0)` until progress is
+  rebuilt without rewards. This also covers offline characters; it is not a milestone claim.
+
+## Quick regression checks
+
+Run `python3 modules/mod-azeroth-completion/tests/run_regressions.py` from the repository root.
+It compiles small excerpts of the production code against core API doubles to check item
+quantities, temporary quest exclusions, and addon framing, without building or starting the server.

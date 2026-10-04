@@ -6,6 +6,8 @@
 #include "Player.h"
 #include "Timer.h"
 #include "WorldSession.h"
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -15,6 +17,12 @@ namespace Azc
     namespace
     {
         constexpr size_t MAX_RESPONSE_BYTES = 48 * 1024;
+
+        std::string LowerText(std::string s)
+        {
+            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            return s;
+        }
 
         std::string Fmt(float value)
         {
@@ -525,6 +533,66 @@ namespace Azc
                 return;
             }
 
+            if (cmd == "SEARCH")
+            {
+                std::string query;
+                for (std::string const& a : args)
+                    query += (query.empty() ? "" : " ") + a;
+                query = LowerText(query);
+                if (query.size() < 2)
+                {
+                    SendError(player, reqId, "QUERY_TOO_SHORT", "Type at least two letters.");
+                    return;
+                }
+                uint8 team = PlayerTeamMask(player);
+                uint32 hits = 0;
+                auto hit = [&](char const* kind, std::string const& id, std::string const& name, uint32 zoneId) -> bool
+                {
+                    if (hits >= 40 || LowerText(name).find(query) == std::string::npos)
+                        return false;
+                    ++hits;
+                    w.Rec("HIT").Kv("k", kind).Kv("id", id).Kv("n", name).Kv("z", zoneId).Kv("zn", defs.AreaName(zoneId));
+                    return true;
+                };
+                for (auto const& pair : defs.zones)
+                {
+                    ZoneDef const& zone = pair.second;
+                    hit("zone", "zone:" + std::to_string(zone.zoneId), zone.name, zone.zoneId);
+                    for (ExplorationObjective const& e : zone.exploration)
+                        hit("exploration", ObjectiveId(CAT_EXPLORATION, e.areaId), e.name, zone.zoneId);
+                    for (uint32 s : zone.storylines)
+                    {
+                        Storyline const* story = defs.FindStoryline(s);
+                        if (!story || !(story->teamMask & team))
+                            continue;
+                        hit("storyline", ObjectiveId(CAT_STORYLINE, s), story->title, zone.zoneId);
+                        std::set<std::string> seen;     // chains often repeat one title ("... II", "... III" aside)
+                        for (uint32 q : story->quests)
+                        {
+                            QuestNode const* node = defs.FindQuest(q);
+                            if (!node || !(TeamMaskOfQuest(*node) & team) || !seen.insert(node->title).second || node->title == story->title)
+                                continue;
+                            if (hit("quest", ObjectiveId(CAT_STORYLINE, s), node->title, zone.zoneId))
+                                w.Kv("q", q);
+                        }
+                    }
+                    // unkilled rares and elites stay secret unless the server reveals them
+                    for (Category cat : { CAT_RARE, CAT_ELITE })
+                        for (CreatureObjective const& c : cat == CAT_RARE ? zone.rares : zone.elites)
+                            if ((c.attackableBy & team) && (cfg.hiddenInfo == 2 || state.Find(cat, c.entry)))
+                                hit(cat == CAT_RARE ? "rare" : "elite", ObjectiveId(cat, c.entry), c.name, zone.zoneId);
+                    for (TravelObjective const& t : zone.travel)
+                        if (t.teamMask & team)
+                            hit("travel", ObjectiveId(CAT_TRAVEL, t.nodeId), t.name, zone.zoneId);
+                }
+                if (hits >= 40)
+                    w.Rec("MORE");
+                if (!hits)
+                    w.Rec("NOHIT").Kv("q", query);
+                SendResponse(player, reqId, w);
+                return;
+            }
+
             if (cmd == "GET_HISTORY")
             {
                 uint32 limit = std::min<uint32>(100, std::max<uint32>(1, uint32(std::strtoul(arg(0).empty() ? "20" : arg(0).c_str(), nullptr, 10))));
@@ -570,7 +638,8 @@ namespace Azc
         out.reserve(text.size());
         for (unsigned char c : text)
         {
-            if (c == '%' || c == '^' || c == ';' || c == '=' || c == '|' || c < 0x20)
+            // Chat trims trailing spaces, including whole chunks of whitespace.
+            if (c == '%' || c == '^' || c == ';' || c == '=' || c == '|' || c <= 0x20)
             {
                 out += '%';
                 out += hex[c >> 4];

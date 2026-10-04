@@ -137,7 +137,7 @@ namespace Azc
         uint64 taxiSig = 0;
         uint64 questSig = 0;
         uint32 generation = 0;
-        bool resync = false;                // rebuild silently on the next update (after a reset)
+        bool resync = false;                // rebuild without rewards after reset; persisted as milestone (0, 0)
         std::map<uint32, uint32> storyUnits;
         std::set<std::pair<uint32, uint8>> catComplete;
         std::map<uint32, std::set<uint32>> availableQuests;

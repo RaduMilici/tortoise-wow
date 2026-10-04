@@ -148,7 +148,7 @@ namespace Azc
         }
 
         // Records whatever the character has achieved in the zone and raises the events that follow.
-        void SyncZone(Player* player, PlayerState& state, Definitions const& defs, ZoneDef const& zone, bool silent, std::vector<Event>& events)
+        void SyncZone(Player* player, PlayerState& state, Definitions const& defs, ZoneDef const& zone, bool silent, std::vector<Event>& events, bool allowRewards = true)
         {
             Settings const& cfg = GetConfig();
             ZoneEval eval = EvaluateZone(player, state, defs, zone, true);
@@ -218,7 +218,7 @@ namespace Azc
                 if (eval.percent < m || state.milestones.count({ zone.zoneId, m }))
                     continue;
                 state.milestones.insert({ zone.zoneId, m });
-                bool grant = cfg.rewardsEnabled && (!silent || cfg.rewardsRetroactive);
+                bool grant = allowRewards && cfg.rewardsEnabled && (!silent || cfg.rewardsRetroactive);
                 std::string reward = grant ? GrantMilestoneRewards(player, zone, m) : std::string();
                 CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_milestone` (`guid`, `zone_id`, `percent`, `claimed_at`, `rewarded`, `definition_version`) "
                     "VALUES (%u, %u, %u, " UI64FMTD ", %u, %u)", state.guid, zone.zoneId, m, uint64(time(nullptr)), grant ? 1u : 0u, zone.version);
@@ -293,10 +293,19 @@ namespace Azc
             state.baselined.insert(zone.zoneId);
         }
 
-        void SyncAll(Player* player, PlayerState& state, Definitions const& defs, bool silent, std::vector<Event>& events)
+        void SyncAll(Player* player, PlayerState& state, Definitions const& defs, bool silent, std::vector<Event>& events, bool allowRewards = true)
         {
             for (auto const& pair : defs.zones)
-                SyncZone(player, state, defs, pair.second, silent, events);
+                SyncZone(player, state, defs, pair.second, silent, events, allowRewards);
+        }
+
+        void FinishReset(PlayerState& state)
+        {
+            if (!state.resync)
+                return;
+            // (zone 0, percent 0) is a pending-reset marker, never a real claim.
+            CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u AND `zone_id` = 0 AND `percent` = 0", state.guid);
+            state.resync = false;
         }
 
         void LoadState(PlayerState& state)
@@ -331,7 +340,10 @@ namespace Azc
                 do
                 {
                     Field* f = result->Fetch();
-                    state.milestones.insert({ f[0].GetUInt32(), f[1].GetUInt32() });
+                    if (!f[0].GetUInt32() && !f[1].GetUInt32())
+                        state.resync = true;
+                    else
+                        state.milestones.insert({ f[0].GetUInt32(), f[1].GetUInt32() });
                 } while (result->NextRow());
             }
         }
@@ -407,8 +419,22 @@ namespace Azc
             fail("WRONG_CLASS", true);
         if (!player->SatisfyQuestChallenges(quest, false))
             fail("CHALLENGE_RESTRICTED", true);
-        if (!player->SatisfyQuestExclusiveGroup(quest, false) || !player->SatisfyQuestNextChain(quest, false))
-            fail("EXCLUSIVE_BRANCH", true);
+        if (!player->SatisfyQuestExclusiveGroup(quest, false))
+        {
+            // An active alternative can still be abandoned. Only a rewarded
+            // alternative permanently removes this branch from completion.
+            bool rewarded = false;
+            auto bounds = sObjectMgr.GetExclusiveQuestGroupsMapBounds(quest->GetExclusiveGroup());
+            for (auto itr = bounds.first; itr != bounds.second; ++itr)
+                if (itr->second != node.id && player->GetQuestRewardStatus(itr->second))
+                    rewarded = true;
+            fail(rewarded ? "EXCLUSIVE_BRANCH" : "EXCLUSIVE_QUEST_ACTIVE", rewarded);
+        }
+        if (!player->SatisfyQuestNextChain(quest, false))
+        {
+            bool rewarded = player->GetQuestRewardStatus(quest->GetNextQuestInChain());
+            fail(rewarded ? "EXCLUSIVE_BRANCH" : "NEXT_CHAIN_ACTIVE", rewarded);
+        }
         if (quest->GetMaxLevel() && quest->GetMaxLevel() < player->GetLevel())
             fail("LEVEL_TOO_HIGH", true);
         if (!player->SatisfyQuestPreviousQuest(quest, false))
@@ -735,7 +761,8 @@ namespace Azc
 
         size_t before = s.records.size();
         std::vector<Event> events;
-        SyncAll(player, s, *defs, true, events);   // retroactive: explored areas, rewarded quests, known flight paths
+        SyncAll(player, s, *defs, true, events, !s.resync);   // retroactive: explored areas, rewarded quests, known flight paths
+        FinishReset(s);
         s.generation = defs->generation;
         s.exploredSig = ExploredSignature(player);
         s.taxiSig = TaxiSignature(player, *defs);
@@ -799,8 +826,8 @@ namespace Azc
 
         if (state->resync && state->generation == defs->generation)
         {
-            state->resync = false;
-            SyncAll(player, *state, *defs, true, events);
+            SyncAll(player, *state, *defs, true, events, false);
+            FinishReset(*state);
         }
         if (state->generation != defs->generation)
         {
@@ -810,7 +837,8 @@ namespace Azc
             state->catComplete.clear();
             state->storyUnits.clear();
             state->availableQuests.clear();
-            SyncAll(player, *state, *defs, true, events);
+            SyncAll(player, *state, *defs, true, events, !state->resync);
+            FinishReset(*state);
             state->generation = defs->generation;
             Event e;
             e.type = "DEFINITION_UPDATED";
@@ -898,8 +926,15 @@ namespace Azc
             return;
         CreatureObjective const& obj = (cat == CAT_RARE ? zone->rares : zone->elites)[ref.index];
 
-        Record(*state, cat, entry, zone->zoneId, zone->version, SOURCE_KILL);
         std::vector<Event> events;
+        // A kill can arrive before the update that rebuilds reset progress.
+        // Restore existing achievements without rewards before processing it.
+        if (state->resync)
+        {
+            SyncAll(player, *state, *defs, true, events, false);
+            FinishReset(*state);
+        }
+        Record(*state, cat, entry, zone->zoneId, zone->version, SOURCE_KILL);
         ZoneEval eval = EvaluateZone(player, *state, *defs, *zone, false);
         events.push_back(MakeObjectiveEvent(*zone, eval, cat, entry, obj.name, obj.bonus));
         SyncZone(player, *state, *defs, *zone, false, events);
@@ -936,6 +971,8 @@ namespace Azc
 
     void ResetProgress(uint32 guidLow, uint32 zoneId)
     {
+        // Keep deletes ordered with inserts made by map-thread progress updates.
+        std::lock_guard<std::recursive_mutex> lock(storeMutex);
         if (zoneId)
         {
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_objective` WHERE `guid` = %u AND `zone_id` = %u", guidLow, zoneId);
@@ -949,7 +986,10 @@ namespace Azc
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u", guidLow);
         }
 
-        std::lock_guard<std::recursive_mutex> lock(storeMutex);
+        // Persist this for offline characters and logouts before the next update.
+        CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_milestone` (`guid`, `zone_id`, `percent`, `claimed_at`, `rewarded`, `definition_version`) "
+            "VALUES (%u, 0, 0, 0, 0, 0)", guidLow);
+
         auto itr = states.find(guidLow);
         if (itr == states.end())
             return;

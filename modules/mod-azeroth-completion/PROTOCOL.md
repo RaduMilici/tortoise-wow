@@ -36,7 +36,7 @@ fields:
 ZONE^id=40^n=Westfall^pct=43;CAT^c=exploration^d=8^tot=13
 ```
 
-Values are escaped: `%`, `^`, `;`, `=`, `|` and control characters become `%XX` (hex). Decode
+Values are escaped: `%`, `^`, `;`, `=`, `|`, spaces and control characters become `%XX` (hex). Decode
 with `string.gsub(v, "%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)` after
 splitting. Lists are comma-separated numbers (`pre=65,132`). Booleans are `0`/`1`. Coordinates are
 world coordinates (`m` map id, `x`, `y`) with one decimal; convert to map percentages on the client.

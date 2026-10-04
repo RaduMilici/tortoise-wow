@@ -107,17 +107,38 @@ namespace Azc
                 uint32 count = uint32(std::max(1, row.value2));
                 if (!proto)
                     return "";
-                if (grant && !player->StoreNewItemInBestSlots(proto->ItemId, count))
+                if (grant)
                 {
-                    // bags full: send it by mail instead of losing it
-                    MailDraft draft;
-                    draft.SetSubjectAndBody("Azeroth Completion", zone.name + " " + std::to_string(percent) + "% milestone reward.");
-                    if (Item* item = Item::CreateItem(proto->ItemId, count, player))
+                    // Preflight the whole reward; the starting-equipment helper can equip
+                    // part of it before failing, which would duplicate those items by mail.
+                    ItemPosCountVec dest;
+                    if (player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, proto->ItemId, count) == EQUIP_ERR_OK)
                     {
-                        item->SaveToDB(true);
-                        draft.AddItem(item);
+                        if (Item* item = player->StoreNewItem(dest, proto->ItemId, true, Item::GenerateItemRandomPropertyId(proto->ItemId)))
+                            player->SendNewItem(item, count, true, false);
                     }
-                    draft.SendMailTo(MailReceiver(player), MailSender(MAIL_NORMAL, uint32(0), MAIL_STATIONERY_GM));
+                    else
+                    {
+                        // CreateItem clamps to one stack; vanilla mail permits one
+                        // attachment, so send a separate mail for each remaining stack.
+                        uint32 remaining = count;
+                        while (remaining)
+                        {
+                            uint32 stack = std::min(remaining, proto->GetMaxStackSize());
+                            Item* item = Item::CreateItem(proto->ItemId, stack, player);
+                            if (!item)
+                            {
+                                sLog.outError("[mod-azeroth-completion] Could not create reward item %u for player %u.", proto->ItemId, player->GetGUIDLow());
+                                break;
+                            }
+                            item->SaveToDB(true);
+                            MailDraft draft;
+                            draft.SetSubjectAndBody("Azeroth Completion", zone.name + " " + std::to_string(percent) + "% milestone reward.");
+                            draft.AddItem(item);
+                            draft.SendMailTo(MailReceiver(player), MailSender(MAIL_NORMAL, uint32(0), MAIL_STATIONERY_GM));
+                            remaining -= stack;
+                        }
+                    }
                 }
                 return (count > 1 ? std::to_string(count) + "x " : std::string()) + proto->Name1;
             }
