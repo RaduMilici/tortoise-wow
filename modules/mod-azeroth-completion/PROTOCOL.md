@@ -24,8 +24,9 @@ R<reqId> <seq>/<total> <chunk>      response to a request
 E<eventSeq> <seq>/<total> <chunk>   pushed event
 ```
 
-Concatenate the chunks of one `R<reqId>` (or `E<n>`) in `seq` order; when `seq == total` the
-payload is complete. Chunks are at most `chunk` bytes (see `PROTO`), split on UTF-8 boundaries.
+Concatenate the chunks of one `R<reqId>` (or `E<n>`) in `seq` order; once all `total` chunks have arrived (they may arrive in any order) the
+payload is complete. Chunks are at most `chunk` bytes (see `PROTO`), split on UTF-8 boundaries,
+and never end on a space (the client trims trailing spaces from chat text).
 
 ## Payload
 
@@ -76,11 +77,12 @@ replaces the name with `???` and leaves out coordinates and loot; with `2` nothi
 | `GET_CURRENT_PROGRESS` | `[all]` | `CUR`, `ZSUM` per zone (zones with progress only, unless `all=1`) |
 | `GET_SUGGESTIONS` | `[zoneId]` | `ZONE`, `SUG`… |
 | `GET_HISTORY` | `[limit]` (default 20, max 100) | `HIST`… newest first, `ZDONE`… |
+| `SEARCH` | `<text>` (2+ letters, may contain spaces) | `HIT`… (max 40, then `MORE`), or `NOHIT` |
 
 `zoneId` 0 or omitted = the zone the character is in. `category` is `exploration`, `storylines`,
 `rares`, `elites` or `travel`.
 
-Errors come back as `ERR^code=...^msg=...`. Codes: `NOT_READY`, `NOT_TRACKED`, `RATE_LIMITED`,
+Errors come back as `ERR^code=...^msg=...`. Codes: `NOT_READY`, `NOT_TRACKED`, `RATE_LIMITED`, `QUERY_TOO_SHORT`,
 `UNKNOWN_REQUEST`, `UNKNOWN_ZONE`, `UNKNOWN_CATEGORY`, `BAD_OBJECTIVE_ID`, `UNKNOWN_OBJECTIVE`,
 `NOT_APPLICABLE`, `UNKNOWN_STORYLINE`, `CLIENT_TOO_OLD`. A reply cut at the size cap ends with a
 `TRUNC` record.
@@ -176,6 +178,12 @@ Milestone: `m` percent, `got` claimed, `rw` reward description.
 Suggestion: `k` (`explore`, `quest`, `rare`, `elite`, `travel`), `id`, `t` display text, `q` quest,
 `m`/`x`/`y`, `dist` yards. Only content the character can do now; rares and elites only when the
 server reveals hidden information.
+
+### HIT
+Search result: `k` (`zone`, `exploration`, `storyline`, `quest`, `rare`, `elite`, `travel`), `id`
+(objective id; `zone:<id>` for zones; for quests the id of their storyline), `n`, `z`, `zn`, and
+`q` quest id for quests. Only content for the character's faction; unkilled rares and elites are
+never returned unless the server reveals hidden information.
 
 ### HIST / ZDONE
 `HIST`: `id`, `c`, `n`, `z`, `zn`, `at`, `src`. `ZDONE`: `z`, `zn`, `at`, `ver`.

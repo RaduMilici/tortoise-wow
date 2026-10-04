@@ -553,6 +553,7 @@ namespace Azc
                 obj.teamMask = team;
                 obj.position = { node->map_id, node->x, node->y, node->z };
                 obj.areaId = areaId;
+                obj.bonus = o && o->mode == OVERRIDE_BONUS;
                 Zone(zoneId).travel.push_back(obj);
                 ++included;
             }
@@ -1162,6 +1163,13 @@ namespace Azc
                 story.title = StorylineTitle(byId[mainRoot]->title);
                 story.summary = byId[mainRoot]->summary;
 
+                // Apply forced requirements before counting and classifying the storyline.
+                Override const* o = FindOverride(CAT_STORYLINE, story.id);
+                if (o && o->mode == OVERRIDE_MANDATORY)
+                    for (QuestNode& n : nodes)
+                        if (n.optional && !n.disabled)
+                            n.optional = false, n.optionalReason.clear();
+
                 uint8 team = 0;
                 uint32 mandatory = 0;
                 story.levelMin = UINT32_MAX;
@@ -1179,7 +1187,6 @@ namespace Azc
                     story.levelMin = 0;
                 story.teamMask = team ? team : TEAM_MASK_BOTH;
 
-                Override const* o = FindOverride(CAT_STORYLINE, story.id);
                 if (o && o->mode == OVERRIDE_EXCLUDE)
                 {
                     ++excludedCounts["override_exclude"];
@@ -1191,13 +1198,6 @@ namespace Azc
                     story.bonus = true;
                     story.bonusReason = o && o->mode == OVERRIDE_BONUS ? "override_bonus" : "no_reliable_quests";
                     ++bonusStorylines;
-                }
-                else if (o && o->mode == OVERRIDE_MANDATORY)
-                {
-                    // Forcing a storyline mandatory still never counts quests that are disabled.
-                    for (QuestNode& n : nodes)
-                        if (n.optional && !n.disabled)
-                            n.optional = false, n.optionalReason.clear();
                 }
 
                 for (QuestNode& n : nodes)
@@ -1235,7 +1235,7 @@ namespace Azc
                     for (uint32 s : zone.storylines) n += !m_defs->storylines[s].bonus;
                     for (auto const& r : zone.rares) n += !r.bonus;
                     for (auto const& e : zone.elites) n += !e.bonus;
-                    n += uint32(zone.travel.size());
+                    for (auto const& t : zone.travel) n += !t.bonus;
                     return n;
                 };
                 if (mandatoryCount() == 0)
@@ -1326,7 +1326,7 @@ namespace Azc
                 }
                 for (auto const& r : zone.rares) h = Fnv(h, "r" + std::to_string(r.entry) + (r.bonus ? "b" : ""));
                 for (auto const& e : zone.elites) h = Fnv(h, "l" + std::to_string(e.entry) + (e.bonus ? "b" : ""));
-                for (auto const& t : zone.travel) h = Fnv(h, "t" + std::to_string(t.nodeId));
+                for (auto const& t : zone.travel) h = Fnv(h, "t" + std::to_string(t.nodeId) + (t.bonus ? "b" : ""));
                 zone.contentHash = h;
             }
 

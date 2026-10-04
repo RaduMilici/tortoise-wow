@@ -182,6 +182,7 @@ namespace Azc
         uint8 teamMask = TEAM_MASK_BOTH;
         Point position;
         uint32 areaId = 0;
+        bool bonus = false;
     };
 
     struct ZoneDef

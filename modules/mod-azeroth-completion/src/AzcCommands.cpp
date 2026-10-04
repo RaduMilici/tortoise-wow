@@ -285,7 +285,7 @@ namespace Azc
         handler->PSendSysMessage("%u elites: %s", uint32(zone->elites.size()),
             names(zone->elites, [](CreatureObjective const& c) { return c.name + "(" + std::to_string(c.importance) + ")" + (c.bonus ? "*" : ""); }).c_str());
         handler->PSendSysMessage("%u travel: %s", uint32(zone->travel.size()),
-            names(zone->travel, [](TravelObjective const& t) { return t.name; }).c_str());
+            names(zone->travel, [](TravelObjective const& t) { return t.name + (t.bonus ? "*" : ""); }).c_str());
         handler->SendSysMessage("(* = bonus, never required)");
 
         std::map<std::string, std::vector<std::string>> excluded;

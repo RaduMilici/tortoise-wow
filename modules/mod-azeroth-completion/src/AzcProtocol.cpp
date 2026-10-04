@@ -42,6 +42,9 @@ namespace Azc
                 size_t len = std::min(chunk, payload.size() - pos);
                 while (len > 1 && pos + len < payload.size() && (static_cast<unsigned char>(payload[pos + len]) & 0xC0) == 0x80)
                     --len;
+                // the client trims trailing spaces from chat text: never end a chunk on one
+                while (len > 1 && pos + len < payload.size() && payload[pos + len - 1] == ' ')
+                    --len;
                 parts.push_back(payload.substr(pos, len));
                 pos += len;
             }
@@ -775,7 +778,7 @@ namespace Azc
         }
         for (ObjectiveEval const& obj : ev.cats[CAT_TRAVEL].objectives)
         {
-            if (obj.done)
+            if (obj.done || obj.bonus)
                 continue;
             TravelObjective const& t = zone.travel[obj.index];
             add("travel", ObjectiveId(CAT_TRAVEL, obj.key), "Flight path: " + t.name, true, t.position);

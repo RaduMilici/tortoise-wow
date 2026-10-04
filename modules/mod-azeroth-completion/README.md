@@ -175,3 +175,11 @@ Two small patches in this fork, both generic:
 Run `python3 modules/mod-azeroth-completion/tests/run_regressions.py` from the repository root.
 It compiles small excerpts of the production code against core API doubles to check item
 quantities, temporary quest exclusions, and addon framing, without building or starting the server.
+Run `python3 modules/mod-azeroth-completion/tests/run_override_regressions.py` to check travel
+and storyline overrides through generation and completion evaluation.
+
+## Addon
+
+The player-facing addon lives in the launcher repository
+(`turtle-launcher/server/launcher-data/client/Interface/AddOns/AzerothCompletion`) and ships to
+players through the launcher. `/azc` opens it; `/azc settings`, `/azc azeroth`, `/azc reset`.

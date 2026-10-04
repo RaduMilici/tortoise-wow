@@ -679,6 +679,7 @@ namespace Azc
             obj.key = t.nodeId;
             obj.index = i;
             obj.name = t.name;
+            obj.bonus = t.bonus;
             obj.done = player->GetTaxi().IsTaximaskNodeKnown(t.nodeId);
             add(CAT_TRAVEL, obj);
         }
