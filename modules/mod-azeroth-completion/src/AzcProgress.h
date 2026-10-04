@@ -1,0 +1,179 @@
+#ifndef AZC_PROGRESS_H
+#define AZC_PROGRESS_H
+
+#include "AzcDefs.h"
+#include <deque>
+#include <functional>
+#include <unordered_set>
+
+class Player;
+class Creature;
+
+namespace Azc
+{
+    enum CompletionSource : uint8
+    {
+        SOURCE_UNKNOWN = 0,
+        SOURCE_RETRO   = 1,     // derived from existing character data at login
+        SOURCE_EXPLORE = 2,
+        SOURCE_KILL    = 3,
+        SOURCE_QUEST   = 4,
+        SOURCE_TAXI    = 5,
+        SOURCE_ADMIN   = 6
+    };
+    char const* SourceName(uint8 source);
+
+    struct CompletionRecord
+    {
+        time_t at = 0;
+        uint32 version = 0;
+        uint8 source = SOURCE_UNKNOWN;
+        uint32 zoneId = 0;
+    };
+
+    enum QuestState : uint8
+    {
+        QUEST_STATE_DONE           = 0,
+        QUEST_STATE_ACTIVE         = 1,
+        QUEST_STATE_AVAILABLE      = 2,
+        QUEST_STATE_BLOCKED        = 3,     // obtainable later
+        QUEST_STATE_NOT_APPLICABLE = 4      // never for this character (class, faction, lost branch...)
+    };
+    char const* QuestStateName(QuestState state);
+
+    struct QuestEval
+    {
+        QuestNode const* node = nullptr;
+        QuestState state = QUEST_STATE_BLOCKED;
+        std::string reason;                 // primary machine-readable reason (empty when done/active/available)
+        std::vector<std::string> reasons;   // every failed requirement
+        std::vector<uint32> missingPrereqs;
+        bool counted = false;               // part of the storyline's completion for this character
+    };
+
+    struct StorylineEval
+    {
+        Storyline const* story = nullptr;
+        std::vector<QuestEval> quests;      // in story->quests order
+        uint32 unitsDone = 0;               // an exclusive (one-of) group counts as one unit
+        uint32 unitsTotal = 0;
+        uint32 questsDone = 0;              // counted quests done (display "4 / 7")
+        uint32 questsTotal = 0;
+        bool applicable = false;
+        bool complete = false;
+        time_t completedAt = 0;
+        uint32 nextQuest = 0;
+        std::vector<uint32> blocked;
+
+        QuestEval const* Find(uint32 questId) const
+        {
+            for (QuestEval const& q : quests)
+                if (q.node->id == questId)
+                    return &q;
+            return nullptr;
+        }
+    };
+
+    struct ObjectiveEval
+    {
+        Category cat = CAT_EXPLORATION;
+        uint32 key = 0;
+        uint32 index = 0;                   // index in the zone's category vector
+        std::string name;
+        bool done = false;
+        time_t at = 0;
+        bool bonus = false;
+        bool hidden = false;                // the addon may show "???"
+        int32 storyIndex = -1;              // storylines: index into ZoneEval::stories
+    };
+
+    struct CategoryEval
+    {
+        uint32 done = 0;
+        uint32 total = 0;
+        uint32 bonusDone = 0;
+        uint32 bonusTotal = 0;
+        uint32 weight = 0;                  // effective weight after redistribution (0 when hidden)
+        uint32 percent = 0;
+        bool visible = false;
+        std::vector<ObjectiveEval> objectives;  // applicable ones only (mandatory + bonus)
+    };
+
+    struct ZoneEval
+    {
+        ZoneDef const* zone = nullptr;
+        std::array<CategoryEval, CAT_COUNT> cats;
+        std::vector<StorylineEval> stories;
+        uint32 percent = 0;
+        bool allDone = false;
+        bool earned = false;                // completion earned at some point; never revoked
+        time_t earnedAt = 0;
+        uint32 earnedVersion = 0;
+        uint32 newSinceEarned = 0;          // objectives added by a later definition version
+    };
+
+    struct Event
+    {
+        std::string type;
+        std::vector<std::pair<std::string, std::string>> fields;
+        std::string chat;                   // one-line text for players without the addon
+    };
+
+    struct PlayerState
+    {
+        uint32 guid = 0;
+        bool addonActive = false;
+        uint32 addonProtocol = 0;
+        std::unordered_map<uint64, CompletionRecord> records;
+        std::map<uint32, std::pair<time_t, uint32>> zonesEarned;    // zone -> (at, version)
+        std::set<std::pair<uint32, uint32>> milestones;             // (zone, percent)
+
+        // runtime only
+        uint32 tickTimer = 0;
+        uint32 forceTimer = 0;
+        uint32 lastZone = 0;
+        uint32 lastLevel = 0;
+        uint64 exploredSig = 0;
+        uint64 taxiSig = 0;
+        uint64 questSig = 0;
+        uint32 generation = 0;
+        bool resync = false;                // rebuild silently on the next update (after a reset)
+        std::map<uint32, uint32> storyUnits;
+        std::set<std::pair<uint32, uint8>> catComplete;
+        std::map<uint32, std::set<uint32>> availableQuests;
+        std::set<uint32> baselined;
+        std::deque<uint32> requestTimes;
+        uint32 eventSeq = 0;
+
+        CompletionRecord const* Find(Category cat, uint32 key) const
+        {
+            auto itr = records.find(MakeObjectiveKey(cat, key));
+            return itr == records.end() ? nullptr : &itr->second;
+        }
+    };
+
+    uint8 PlayerTeamMask(Player const* player);
+
+    // All of these lock the progress store internally; callers pass the live Player.
+    void ProgressOnLogin(Player* player);
+    void ProgressOnLogout(Player* player);
+    void ProgressOnDelete(uint32 guidLow);
+    void ProgressOnUpdate(Player* player, uint32 diff);
+    void ProgressOnKill(Player* player, Creature* creature);
+    void ProgressOnZoneChange(Player* player);
+    void ProgressOnDefinitionsChanged(DefinitionsPtr const& oldDefs, DefinitionsPtr const& newDefs);
+    uint32 ProgressTrackedPlayers();
+
+    // Runs fn with the player's state under the store lock (nullptr state if not tracked).
+    void WithState(Player* player, std::function<void(PlayerState*)> const& fn);
+
+    // Pure evaluation; caller must hold the store (use inside WithState).
+    ZoneEval EvaluateZone(Player* player, PlayerState const& state, Definitions const& defs, ZoneDef const& zone, bool withQuestDetail = true);
+    StorylineEval EvaluateStoryline(Player* player, PlayerState const& state, Definitions const& defs, Storyline const& story);
+    QuestEval EvaluateQuest(Player* player, QuestNode const& node);
+
+    // Admin: forget one character's progress in one zone (0 = every zone). Works offline.
+    void ResetProgress(uint32 guidLow, uint32 zoneId);
+}
+
+#endif

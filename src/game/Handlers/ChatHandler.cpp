@@ -672,9 +672,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
                     return;
             }
 
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
-                return;
-
             if (_player && lang != LANG_ADDON)
                 ScriptRegistry<PlayerScript>::ForEachEnabledHook(PLAYERHOOK_ON_CHAT_WHISPER,
                     [&](PlayerScript* s) { s->OnChatWhisper(_player, msg.c_str()); });
@@ -692,8 +689,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
         {
             if (Guild* guild = sGuildMgr.GetGuildById(GetMasterPlayer()->GetGuildId()))
             {
-                if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
-                    return;
 
                 guild->BroadcastToGuild(this, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
 
@@ -731,8 +726,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
             if (GetMasterPlayer()->GetGuildId())
                 if (Guild* guild = sGuildMgr.GetGuildById(GetMasterPlayer()->GetGuildId()))
                 {
-                    if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
-                        return;
                     guild->BroadcastToOfficers(this, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
                 }
 
@@ -751,9 +744,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
                 if (!group || group->isBGGroup() || !group->isRaidGroup())
                     return;
             }
-
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
-                return;
 
             WorldPacket data;
             ChatHandler::BuildChatPacket(data, CHAT_MSG_RAID, msg.c_str(), Language(lang), _player->GetChatTag(), _player->GetObjectGuid(), _player->GetName());
@@ -775,9 +765,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
                     return;
             }
 
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
-                return;
-
             WorldPacket data;
             ChatHandler::BuildChatPacket(data, CHAT_MSG_RAID_LEADER, msg.c_str(), Language(lang), _player->GetChatTag(), _player->GetObjectGuid(), _player->GetName());
             group->BroadcastPacket(&data, false);
@@ -792,9 +779,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
             Group *group = GetPlayer()->GetGroup();
             if (!group || !group->isRaidGroup() ||
                     !(group->IsLeader(GetPlayer()->GetObjectGuid()) || group->IsAssistant(GetPlayer()->GetObjectGuid())))
-                return;
-
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
                 return;
 
             WorldPacket data;
@@ -812,9 +796,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
             // battleground raid is always in Player->GetGroup(), never in GetOriginalGroup()
             Group *group = GetPlayer()->GetGroup();
             if (!group || !group->isBGGroup())
-                return;
-
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
                 return;
 
             WorldPacket data;
@@ -838,9 +819,6 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket & recv_data)
             // battleground raid is always in Player->GetGroup(), never in GetOriginalGroup()
             Group *group = GetPlayer()->GetGroup();
             if (!group || !group->isBGGroup() || !group->IsLeader(GetPlayer()->GetObjectGuid()))
-                return;
-
-            if (lang == LANG_ADDON && _player && sScriptMgr.OnAddonMessage(_player, msg))
                 return;
 
             WorldPacket data;
@@ -1089,6 +1067,12 @@ bool WorldSession::HandleTurtleAddonMessages(uint32 lang, uint32 type, std::stri
     {
         return false;
     }
+
+    // Modules see every addon message once, whatever the channel. Checking here rather than
+    // per chat type also reaches players without a group or guild, whose GUILD/PARTY messages
+    // the per-type cases below would drop before any module saw them.
+    if (_player && sScriptMgr.OnAddonMessage(_player, msg))
+        return true;
 
     if (sLFTMgr.HandleAddonMessage(_player, type, msg))
         return true;

@@ -1,0 +1,143 @@
+###################################################################################################
+# mod-azeroth-completion module configuration
+#
+# Every eligible outdoor zone becomes a completion checklist generated from world data:
+# Exploration, Storylines, Rare Hunts, Elite Encounters and Travel (flight paths).
+# Player commands: .ac, .ac missing, .ac progress, .ac suggest
+# Admin commands:  .ac status, .ac inspect <zone>, .ac regenerate, .ac reset <character> <zone>
+###################################################################################################
+
+[ModuleConf]
+
+#    AzerothCompletion.Enable
+#        Default: 1
+
+AzerothCompletion.Enable = 1
+
+#    AzerothCompletion.Maps
+#        Comma-separated map ids whose outdoor zones get a checklist.
+#        Default: "0,1" (Eastern Kingdoms, Kalimdor)
+
+AzerothCompletion.Maps = "0,1"
+
+#    AzerothCompletion.Weight.*
+#        Share of each category in the zone percentage. A category with nothing to do in a zone
+#        is hidden and its weight is shared out proportionally among the others.
+#        Default: 30 / 30 / 15 / 15 / 10
+
+AzerothCompletion.Weight.Exploration = 30
+AzerothCompletion.Weight.Storylines = 30
+AzerothCompletion.Weight.Rares = 15
+AzerothCompletion.Weight.Elites = 15
+AzerothCompletion.Weight.Travel = 10
+
+#    AzerothCompletion.SyncIntervalMs
+#        How often a character's explored areas, quests and flight paths are checked for news.
+#        Default: 2000
+
+AzerothCompletion.SyncIntervalMs = 2000
+
+#    AzerothCompletion.Exploration.MinTerrainCells
+#        Areas covering fewer terrain cells (about 33x33 yards each) are treated as technical
+#        subdivisions and skipped, unless they are defined by a building or cave model.
+#        Default: 3
+
+AzerothCompletion.Exploration.MinTerrainCells = 3
+
+#    AzerothCompletion.Storylines.MinQuests / MaxQuests
+#        Size limits of a connected quest group to count as a storyline. Bigger groups are
+#        usually hubs (war efforts, reputation turn-ins) rather than stories.
+#        Default: 2 / 40
+
+AzerothCompletion.Storylines.MinQuests = 2
+AzerothCompletion.Storylines.MaxQuests = 40
+
+#    AzerothCompletion.Elites.MaxSpawns
+#        Elites with more permanent spawns than this are generic trash.
+#        Default: 2
+
+AzerothCompletion.Elites.MaxSpawns = 2
+
+#    AzerothCompletion.Elites.MinScore
+#        Score an elite needs to be an encounter: +2 single spawn, +3 quest target, +2 unique name,
+#        +1 title, +3 world boss, +1 scripted, +1 well above the zone's level.
+#        Default: 4
+
+AzerothCompletion.Elites.MinScore = 4
+
+#    AzerothCompletion.Elites.WorldBossesMandatory
+#        0 = world bosses are bonus objectives (never required), 1 = required.
+#        Default: 0
+
+AzerothCompletion.Elites.WorldBossesMandatory = 0
+
+#    AzerothCompletion.HiddenInfo
+#        Unkilled rares and elites:
+#        0 = server hides them ("???", no coordinates)
+#        1 = server sends them with a hidden flag; the addon chooses what to show
+#        2 = always revealed (also lets suggestions point at them)
+#        Default: 1
+
+AzerothCompletion.HiddenInfo = 1
+
+#    AzerothCompletion.Rares.ExposeRespawn / ExposeLoot
+#        Send respawn time ranges / notable loot of rares and elites to the addon.
+#        Default: 1 / 1
+
+AzerothCompletion.Rares.ExposeRespawn = 1
+AzerothCompletion.Rares.ExposeLoot = 1
+
+#    AzerothCompletion.ChatNotify
+#        Chat lines for completed objectives, milestones and zones:
+#        0 = never, 1 = only for players without the addon, 2 = always
+#        Default: 1
+
+AzerothCompletion.ChatNotify = 1
+
+#    AzerothCompletion.Rewards.Enable
+#        Grant the rewards in the world table azcomp_milestone_reward.
+#        Default: 1
+
+AzerothCompletion.Rewards.Enable = 1
+
+#    AzerothCompletion.Rewards.Milestones
+#        Default: "25,50,75,100"
+
+AzerothCompletion.Rewards.Milestones = "25,50,75,100"
+
+#    AzerothCompletion.Rewards.Retroactive
+#        Milestones reached from progress made before the module existed (or by a reset):
+#        0 = marked as claimed without a reward, 1 = rewarded.
+#        Default: 0
+
+AzerothCompletion.Rewards.Retroactive = 0
+
+#    AzerothCompletion.Protocol.ChunkSize
+#        Payload bytes per addon message (64-230). Vanilla clients cap a message at 255 bytes.
+#        Default: 200
+
+AzerothCompletion.Protocol.ChunkSize = 200
+
+#    AzerothCompletion.Protocol.MaxRequestsPer10s
+#        Default: 30
+
+AzerothCompletion.Protocol.MaxRequestsPer10s = 30
+
+#    AzerothCompletion.Suggestions.Count / Range
+#        Size of the suggestion list and how far (yards) "nearby" reaches.
+#        Default: 6 / 800
+
+AzerothCompletion.Suggestions.Count = 6
+AzerothCompletion.Suggestions.Range = 800
+
+#    AzerothCompletion.SkipBots
+#        Do not track characters controlled by a bot module.
+#        Default: 1
+
+AzerothCompletion.SkipBots = 1
+
+#    AzerothCompletion.Generator.LogDetail
+#        Log one line per zone (counts and exclusions) at startup and on .ac regenerate.
+#        Default: 0
+
+AzerothCompletion.Generator.LogDetail = 0

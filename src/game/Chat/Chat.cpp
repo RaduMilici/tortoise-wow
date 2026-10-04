@@ -1469,6 +1469,14 @@ ChatCommandSearchResult ChatHandler::FindCommand(ChatCommand* table, char const*
 
     while (*text == ' ') ++text;
 
+    // A command typed in full beats an abbreviation of an earlier entry: module commands are
+    // appended after the core table, so without this ".ac" would always open ".account".
+    auto isFullName = [&cmd](char const* name) { return strlen(name) == cmd.size() && hasStringAbbr(name, cmd.c_str()); };
+    bool fullNameTyped = false;
+    if (!exactlyName && !cmd.empty())
+        for (uint32 i = 0; table[i].Name != nullptr && !fullNameTyped; ++i)
+            fullNameTyped = isFullName(table[i].Name);
+
     // search first level command in table
     for (uint32 i = 0; table[i].Name != nullptr; ++i)
     {
@@ -1476,6 +1484,11 @@ ChatCommandSearchResult ChatHandler::FindCommand(ChatCommand* table, char const*
         {
             size_t len = strlen(table[i].Name);
             if (strncmp(table[i].Name, cmd.c_str(), len + 1) != 0)
+                continue;
+        }
+        else if (fullNameTyped)
+        {
+            if (!isFullName(table[i].Name))
                 continue;
         }
         else
