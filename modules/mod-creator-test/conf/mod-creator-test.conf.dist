@@ -1,0 +1,3 @@
+[ModuleConf]
+# Disabled on ordinary servers. Noggit's managed loopback runtime enables it.
+CreatorTest.Enable = 0
