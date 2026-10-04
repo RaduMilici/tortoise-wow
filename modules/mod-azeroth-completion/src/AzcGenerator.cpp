@@ -391,7 +391,7 @@ namespace Azc
             load("SELECT `id`, `quest` FROM `creature_involvedrelation`", m_questEndCreature);
             load("SELECT `id`, `quest` FROM `gameobject_questrelation`", m_questStartGo);
             load("SELECT `id`, `quest` FROM `gameobject_involvedrelation`", m_questEndGo);
-            load("SELECT `entry`, `startquest` FROM `item_template` WHERE `startquest` > 0", m_questStartItem);
+            load("SELECT `entry`, `start_quest` FROM `item_template` WHERE `start_quest` > 0", m_questStartItem);
             for (auto const& pair : m_questStartCreature)
                 m_questsStartedByCreature[pair.second].push_back(pair.first);
 
