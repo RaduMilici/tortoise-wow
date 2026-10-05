@@ -44,7 +44,7 @@ void ChannelBroadcaster::EnableSendingMessages()
 	bShouldSentMessages.store(true);
 	while (!bIsWorking.load() && !sWorld.IsStopped())
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(0));
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
 
@@ -53,7 +53,7 @@ void ChannelBroadcaster::DisableSendingMessages()
 	bShouldSentMessages.store(false);
 	while (bIsWorking.load())
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(0));
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
 
@@ -76,7 +76,7 @@ void ChannelBroadcaster::ThreadProc()
 
 
 			ChannelMessage msg;
-			while (MessageIterator < 5 && MessageQueue.try_dequeue(msg))
+			while (MessageIterator < MessageLimit && MessageQueue.try_dequeue(msg))
 			{
 				ChannelMessage& ChanMsg = msg;
 
@@ -85,6 +85,9 @@ void ChannelBroadcaster::ThreadProc()
 				TargetChannel->Say(ChanMsg.PlayerGuid, ChanMsg.Message.c_str(), ChanMsg.Language, ChanMsg.bSkipChecks);
 				MessageIterator++;
 			}
+			// Map updates keep this worker enabled even when there are no chat messages.
+			if (MessageIterator == 0)
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 		bIsWorking.store(false);
 
