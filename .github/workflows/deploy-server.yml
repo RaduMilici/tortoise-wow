@@ -1,0 +1,102 @@
+# Builds tortoise-server:mine from the pushed commit, loads it on the Lightsail server and
+# restarts the stack. Build settings live in deploy/server-build.env.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_SSH_KEY      private key whose public half is in the server's ~/.ssh/authorized_keys
+#   DEPLOY_SSH_TARGET   user@host, e.g. ubuntu@63.184.170.236
+#   DEPLOY_KNOWN_HOSTS  output of `ssh-keyscan <host>` (pins the server's host key)
+name: Deploy server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one instead of cutting it off mid-ship.
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'RaduMilici/tortoise-wow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fork
+          sparse-checkout: deploy
+
+      - name: Read build settings
+        run: |
+          source fork/deploy/server-build.env
+          {
+            echo "DEPLOY_REPOSITORY=$DEPLOY_REPOSITORY"
+            echo "DEPLOY_REVISION=$DEPLOY_REVISION"
+            echo "MODULES=$MODULES"
+            echo "MODULE_CONFIGS=$MODULE_CONFIGS"
+            echo "MODULE_SQL_MODULES=$MODULE_SQL_MODULES"
+            echo "MODULE_BUILD_PACKAGES=$MODULE_BUILD_PACKAGES"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEPLOY_REPOSITORY }}
+          ref: ${{ env.DEPLOY_REVISION }}
+          path: tortoise-deploy
+
+      # The core plus modules is a big compile; the runner's preinstalled SDKs take disk it needs.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Build image
+        working-directory: tortoise-deploy
+        run: |
+          docker build -f docker/server/Dockerfile -t tortoise-server:mine \
+            --build-arg TORTOISE_REPOSITORY_URL="https://github.com/${{ github.repository }}.git" \
+            --build-arg TORTOISE_REVISION="${{ github.sha }}" \
+            --build-arg TORTOISE_MODULES="$MODULES" \
+            --build-arg TORTOISE_MODULE_CONFIGS="$MODULE_CONFIGS" \
+            --build-arg TORTOISE_MODULE_SQL_MODULES="$MODULE_SQL_MODULES" \
+            --build-arg TORTOISE_MODULE_BUILD_PACKAGES="$MODULE_BUILD_PACKAGES" \
+            --build-arg TORTOISE_FAIL_ON_PATCH_ERROR=1 \
+            .
+
+      - name: Set up SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  ServerAliveInterval 30\n' \
+            "${DEPLOY_SSH_TARGET#*@}" "${DEPLOY_SSH_TARGET%@*}" > ~/.ssh/config
+        env:
+          DEPLOY_SSH_TARGET: ${{ secrets.DEPLOY_SSH_TARGET }}
+
+      - name: Ship image
+        run: docker save tortoise-server:mine | gzip | ssh deploy 'gunzip | docker load'
+
+      # `up -d` recreates every container whose image changed (mangosd, realmd); the prune drops
+      # the previous tortoise-server:mine, which is now untagged, so the disk doesn't fill up.
+      - name: Restart server
+        run: |
+          ssh deploy 'set -e
+            cd ~/tortoise-deploy
+            docker compose up -d
+            docker image prune -f
+            docker compose ps'
+
+      - name: Check mangosd started
+        run: |
+          ssh deploy 'cd ~/tortoise-deploy
+            for i in $(seq 1 60); do
+              if docker compose logs --since 10m mangosd 2>&1 | grep -q "World server is up and running"; then
+                echo "mangosd is up"; exit 0
+              fi
+              if [ "$(docker compose ps -q mangosd | xargs -r docker inspect -f "{{.State.Running}}")" != "true" ]; then
+                echo "mangosd is not running"; docker compose logs --tail 200 mangosd; exit 1
+              fi
+              sleep 10
+            done
+            echo "mangosd did not report startup within 10 minutes"; docker compose logs --tail 200 mangosd; exit 1'
