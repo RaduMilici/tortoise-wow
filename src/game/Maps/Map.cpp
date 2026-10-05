@@ -92,7 +92,7 @@ Map::~Map()
 
 void Map::LoadMapAndVMap(int gx, int gy)
 {
-    if (m_bLoadedGrids[gx][gx])
+    if (m_bLoadedGrids[gx][gy])
         return;
 
     GridMap * pInfo = m_TerrainData->Load(gx, gy);
@@ -610,6 +610,18 @@ void Map::UpdateSync(const uint32 diff)
     */
 }
 
+// Players and fully active objects keep everything within activation distance running.
+// On continents, objects active only for their view range or formation (see
+// WorldObject::SetActiveObjectState) just need their own cell: whatever lies around
+// them is out of every player's sight, and a player who comes close updates it.
+float Map::GetCellUpdateRadius(WorldObject const* object) const
+{
+    if (IsContinent() && object->IsLocallyActiveObject() && sWorld.getConfig(CONFIG_BOOL_ACTIVE_OBJECTS_LOCAL_UPDATES))
+        return 0.0f;
+
+    return object->GetGridActivationDistance();
+}
+
 inline void Map::UpdateCellsAroundObject(uint32 now, uint32 diff, WorldObject const* object)
 {
     if (!object || !object->IsInWorld() || !object->IsPositionValid())
@@ -620,7 +632,7 @@ inline void Map::UpdateCellsAroundObject(uint32 now, uint32 diff, WorldObject co
     TypeContainerVisitor<MaNGOS::ObjectUpdater, WorldTypeMapContainer > world_object_update(updater);
 
     //lets update mobs/objects in ALL visible cells around player!
-    CellArea area = Cell::CalculateCellArea(object->GetPositionX(), object->GetPositionY(), object->GetGridActivationDistance());
+    CellArea area = Cell::CalculateCellArea(object->GetPositionX(), object->GetPositionY(), GetCellUpdateRadius(object));
 
     for (uint32 x = area.low_bound.x_coord; x <= area.high_bound.x_coord; ++x)
     {
@@ -637,9 +649,11 @@ inline void Map::UpdateCellsAroundObject(uint32 now, uint32 diff, WorldObject co
                 cell.SetNoCreate();
                 Visit(cell, grid_object_update);
                 Visit(cell, world_object_update);
+                ++m_lastCellsUpdated;
             }
         }
     }
+    m_lastObjectsUpdated += updater.i_updated;
 }
 
 inline void Map::MarkCellsAroundObject(WorldObject const* object)
@@ -647,7 +661,7 @@ inline void Map::MarkCellsAroundObject(WorldObject const* object)
     if (!object || !object->IsInWorld() || !object->IsPositionValid())
         return;
 
-    CellArea area = Cell::CalculateCellArea(object->GetPositionX(), object->GetPositionY(), object->GetGridActivationDistance());
+    CellArea area = Cell::CalculateCellArea(object->GetPositionX(), object->GetPositionY(), GetCellUpdateRadius(object));
 
     for (uint32 x = area.low_bound.x_coord; x <= area.high_bound.x_coord; ++x)
     {
@@ -686,6 +700,7 @@ inline void Map::UpdateActiveCellsCallback(uint32 diff, uint32 now, uint32 threa
             Visit(cell, world_object_update);
         }
     }
+    m_lastObjectsUpdated += updater.i_updated;
 }
 
 inline void Map::UpdateActiveCellsAsynch(uint32 now, uint32 diff)
@@ -698,6 +713,8 @@ inline void Map::UpdateActiveCellsAsynch(uint32 now, uint32 diff)
 
     for (m_activeNonPlayersIter = m_activeNonPlayers.begin(); m_activeNonPlayersIter != m_activeNonPlayers.end(); ++m_activeNonPlayersIter)
         MarkCellsAroundObject(*m_activeNonPlayersIter);
+
+    m_lastCellsUpdated = marked_cells.count();
 
     const int nthreads = m_cellThreads->size();
     for (int step = 0; step < 2; step++)
@@ -744,6 +761,8 @@ inline void Map::UpdateCells(uint32 map_diff)
     if (diff < sWorld.getConfig(CONFIG_UINT32_MAPUPDATE_UPDATE_CELLS_DIFF))
         return;
     _lastCellsUpdate = now;
+    m_lastCellsUpdated = 0;
+    m_lastObjectsUpdated = 0;
 
     /// update active cells around players and active objects
     if (IsContinent() && m_cellThreads->status() == ThreadPool::Status::READY)
@@ -753,14 +772,31 @@ inline void Map::UpdateCells(uint32 map_diff)
 
     if (IsContinent() && m_motionThreads->status() == ThreadPool::Status::READY && !unitsMvtUpdate.empty())
     {
-        for (auto it = unitsMvtUpdate.begin(); it != unitsMvtUpdate.end(); it++)
-            m_motionThreads << [it,diff](){
-                 if ((*it)->IsInWorld())
-                    (*it)->GetMotionMaster()->UpdateMotionAsync(diff);
+        // A few batches per worker instead of one task per unit; path costs vary, so
+        // workers still pick up batches as they finish.
+        size_t const count = unitsMvtUpdate.size();
+        size_t const batches = std::min<size_t>(count, m_motionThreads->size() * 4);
+        size_t const batchSize = (count + batches - 1) / batches;
+        Unit* const* units = unitsMvtUpdate.data();
+        for (size_t begin = 0; begin < count; begin += batchSize)
+        {
+            size_t const end = std::min(count, begin + batchSize);
+            m_motionThreads << [units, begin, end, diff]()
+            {
+                for (size_t i = begin; i < end; ++i)
+                    if (units[i] && units[i]->IsInWorld())
+                        units[i]->GetMotionMaster()->UpdateMotionAsync(diff);
             };
+        }
         m_motionThreads->processWorkload().wait();
     }
-    unitsMvtUpdate.clear();
+    {
+        std::unique_lock<std::mutex> lock(unitsMvtUpdate_lock);
+        for (Unit* unit : unitsMvtUpdate)
+            if (unit)
+                unit->m_queuedForMovementUpdate = false;
+        unitsMvtUpdate.clear();
+    }
 }
 
 
@@ -1234,6 +1270,9 @@ void Map::Remove(T *obj, bool remove)
 
     if (obj->isActiveObject())
         RemoveFromActive(obj);
+
+    if constexpr (std::is_base_of<Unit, T>::value)
+        RemoveUnitFromMovementUpdate(obj);
 
     if (remove)
         obj->CleanupsBeforeDelete();
@@ -2746,13 +2785,19 @@ void Map::RemoveRelocatedUnit(Unit *obj)
 void Map::AddUnitToMovementUpdate(Unit *unit)
 {
     std::unique_lock<std::mutex> lock(unitsMvtUpdate_lock);
-    unitsMvtUpdate.insert(unit);
+    if (unit->m_queuedForMovementUpdate)
+        return;
+    unit->m_queuedForMovementUpdate = true;
+    unitsMvtUpdate.push_back(unit);
 }
 
 void Map::RemoveUnitFromMovementUpdate(Unit *unit)
 {
     std::unique_lock<std::mutex> lock(unitsMvtUpdate_lock);
-    unitsMvtUpdate.erase(unit);
+    if (!unit->m_queuedForMovementUpdate)
+        return;
+    unit->m_queuedForMovementUpdate = false;
+    std::replace(unitsMvtUpdate.begin(), unitsMvtUpdate.end(), unit, static_cast<Unit*>(nullptr));
 }
 
 //#define MAP_SENDOBJECTUPDATES_PROFILE
@@ -3447,7 +3492,12 @@ void Map::BindToInstanceOrRaid(Player* player, time_t objectResetTime, bool perm
 void Map::PrintInfos(ChatHandler& handler)
 {
     handler.PSendSysMessage("Performance infos on Map (%u, %u)", GetId(), GetInstanceId());
-    handler.PSendSysMessage("%u non player active", m_activeNonPlayers.size());
+    uint32 locallyActive = 0;
+    for (auto const obj : m_activeNonPlayers)
+        if (obj->IsLocallyActiveObject())
+            ++locallyActive;
+    handler.PSendSysMessage("%u non player active (%u view range or formation only)", m_activeNonPlayers.size(), locallyActive);
+    handler.PSendSysMessage("Last cells update: %u cells, %u objects", m_lastCellsUpdated, m_lastObjectsUpdated.load());
     handler.PSendSysMessage("%u objects to client update [%u threads]", i_objectsToClientUpdate.size(), _objUpdatesThreads);
     handler.PSendSysMessage("%u objects relocated [%u threads]", i_unitsRelocated.size(), _unitRelocationThreads);
     handler.PSendSysMessage("%u scripts scheduled", m_scriptSchedule.size());

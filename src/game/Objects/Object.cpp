@@ -1281,7 +1281,7 @@ void WorldObject::SetVisibilityModifier(float f)
 }
 
 WorldObject::WorldObject() :
-    m_isActiveObject(false), m_visibilityModifier(DEFAULT_VISIBILITY_MODIFIER), m_currMap(nullptr), m_mapId(0), m_InstanceId(0), m_summonLimitAlert(0)
+    m_isActiveObject(false), m_activeLocalOnly(false), m_visibilityModifier(DEFAULT_VISIBILITY_MODIFIER), m_currMap(nullptr), m_mapId(0), m_InstanceId(0), m_summonLimitAlert(0)
 {
     // Phasing
     worldMask = WORLD_DEFAULT_OBJECT;
@@ -2985,10 +2985,14 @@ bool WorldObject::PrintCoordinatesError(float x, float y, float z, char const* d
     return false;                                           // always false for continue assert fail
 }
 
-void WorldObject::SetActiveObjectState(bool on)
+void WorldObject::SetActiveObjectState(bool on, bool localOnly)
 {
     if (m_isActiveObject == on)
+    {
+        if (on && !localOnly)
+            m_activeLocalOnly = false;
         return;
+    }
 
     ASSERT(GetTypeId() == TYPEID_UNIT || GetTypeId() == TYPEID_GAMEOBJECT);
 
@@ -3005,6 +3009,7 @@ void WorldObject::SetActiveObjectState(bool on)
     }
 
     m_isActiveObject = on;
+    m_activeLocalOnly = on && localOnly;
 
     if (world)
     {

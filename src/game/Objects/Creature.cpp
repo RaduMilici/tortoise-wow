@@ -256,7 +256,7 @@ void Creature::AddToWorld()
     if (m_creatureGroup)
     {
         if (m_creatureGroup->IsFormation())
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
         if (GetDeathState() == ALIVE || GetDeathState() == JUST_ALIVED)
             m_creatureGroup->OnRespawn(this);
     }
@@ -634,21 +634,21 @@ bool Creature::UpdateEntry(uint32 Entry, CreatureData const* data /*=nullptr*/, 
     {
         SetVisibilityModifier(VISIBILITY_DISTANCE_LARGE);
         if (sWorld.getConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS))
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
     }
 
     if (HasExtraFlag(CREATURE_FLAG_EXTRA_GIGANTIC_AOI))
     {
         SetVisibilityModifier(VISIBILITY_DISTANCE_GIGANTIC);
         if (sWorld.getConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS))
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
     } 
 
     if (HasExtraFlag(CREATURE_FLAG_EXTRA_INFINITE_AOI))
     {
         SetVisibilityModifier(MAX_VISIBILITY_DISTANCE);
         if (sWorld.getConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS))
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
     }
 
     if (AI() && GetCreatureInfo()->spell_list_id)

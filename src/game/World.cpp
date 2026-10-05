@@ -1304,6 +1304,7 @@ void World::LoadConfigSettingsFromFile(bool reload)
     setConfig(CONFIG_BOOL_PTR, "PTR", false);
 
     setConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS, "Visibility.ForceActiveObjects", true);
+    setConfig(CONFIG_BOOL_ACTIVE_OBJECTS_LOCAL_UPDATES, "Visibility.ActiveObjects.LocalUpdates", true);
     
     ///- Load the CharDelete related config options
     setConfigMinMax(CONFIG_UINT32_CHARDELETE_METHOD, "CharDelete.Method", 0, 0, 1);

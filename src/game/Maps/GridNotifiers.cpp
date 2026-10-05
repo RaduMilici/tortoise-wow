@@ -214,6 +214,7 @@ ObjectUpdater::Visit(GridRefManager<T> &m)
     {
         WorldObject::UpdateHelper helper(iter->getSource());
         helper.UpdateRealTime(i_now, i_timeDiff);
+        ++i_updated;
     }
 }
 

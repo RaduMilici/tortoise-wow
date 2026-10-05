@@ -42,6 +42,7 @@
 #include "SQLStorages.h"
 #include "CreatureLinkingMgr.h"
 
+#include <atomic>
 #include <bitset>
 #include <list>
 #include <set>
@@ -356,6 +357,7 @@ class Map : public GridRefManager<NGridType>
 
         static void DeleteFromWorld(Player* player);        // player object will deleted at call
 
+        float GetCellUpdateRadius(WorldObject const* object) const;
         inline void UpdateCellsAroundObject(uint32 now, uint32 diff, WorldObject const* object);
         inline void UpdateActiveCellsSynch(uint32 now, uint32 diff);
         inline void MarkCellsAroundObject(WorldObject const* object);
@@ -669,7 +671,12 @@ class Map : public GridRefManager<NGridType>
         std::unordered_set<Unit* > i_unitsRelocated;
 
         mutable std::mutex unitsMvtUpdate_lock;
-        std::unordered_set<Unit*> unitsMvtUpdate;
+        // Units are queued at most once (Unit::m_queuedForMovementUpdate); removed units are nulled.
+        std::vector<Unit*> unitsMvtUpdate;
+
+        // Last active cells update, shown by .instance perfinfos
+        uint32 m_lastCellsUpdated = 0;
+        std::atomic<uint32> m_lastObjectsUpdated{0};
 
         mutable MapMutexType _corpseRemovalLock;
 

@@ -120,6 +120,7 @@ namespace MaNGOS
     {
         uint32 i_timeDiff;
         uint32 i_now;
+        uint32 i_updated = 0;
         explicit ObjectUpdater(const uint32 &diff, uint32 now) : i_timeDiff(diff), i_now(now) {}
         template<class T> void Visit(GridRefManager<T> &m);
         void Visit(PlayerMapType &) {}

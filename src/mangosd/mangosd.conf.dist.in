@@ -1683,6 +1683,14 @@ Visibility.AIRelocationNotifyDelay = 1000
 
 Visibility.ForceActiveObjects = 1
 
+# Visibility.ActiveObjects.LocalUpdates
+# On continents, objects made active only for their long view range (see above) and members of
+# moving formations update just their own cell instead of every cell within the activation
+# distance. Cells near players and around other active objects (escorts, events) are unaffected.
+# 0 restores the old behaviour.
+
+Visibility.ActiveObjects.LocalUpdates = 1
+
 # Health and power regeneration and rage income from damage.
 
 Rate.Health = 1

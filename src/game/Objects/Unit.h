@@ -1535,6 +1535,8 @@ class Unit : public WorldObject
         
         MotionMaster* GetMotionMaster() { return &i_motionMaster; }
         MotionMaster const* GetMotionMaster() const { return &i_motionMaster; }
+        // Set while queued in Map::unitsMvtUpdate, guarded by Map::unitsMvtUpdate_lock.
+        bool m_queuedForMovementUpdate = false;
         void RestoreMovement();
 
         template <class T>

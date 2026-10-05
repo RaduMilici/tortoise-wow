@@ -46,7 +46,13 @@ inline void MaNGOS::VisibleNotifier::Visit(GridRefManager<T> &m)
 
 inline void MaNGOS::ObjectUpdater::Visit(CreatureMapType &m)
 {
+    // Snapshot, since updates can move creatures between cells. The buffer keeps its
+    // capacity between cells; taking it by swap keeps a nested visit safe.
+    static thread_local std::vector<Creature*> spareBuffer;
     std::vector<Creature*> creaturesToUpdate;
+    creaturesToUpdate.swap(spareBuffer);
+    creaturesToUpdate.clear();
+
     for (const auto& iter : m)
         creaturesToUpdate.push_back(iter.getSource());
 
@@ -55,6 +61,9 @@ inline void MaNGOS::ObjectUpdater::Visit(CreatureMapType &m)
         WorldObject::UpdateHelper helper(it);
         helper.UpdateRealTime(i_now, i_timeDiff);
     }
+    i_updated += creaturesToUpdate.size();
+
+    spareBuffer.swap(creaturesToUpdate);
 }
 
 inline void CallAIMoveLOS(Creature* c, Unit* moving)

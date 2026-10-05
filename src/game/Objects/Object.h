@@ -1086,7 +1086,10 @@ class WorldObject : public Object
         void GetAlivePlayerListInRange(WorldObject const* pSource, std::list<Player*>& lList, float fMaxSearchRange) const;
 
         bool isActiveObject() const { return m_isActiveObject || m_viewPoint.hasViewers(); }
-        void SetActiveObjectState(bool on);
+        // localOnly: the object must keep updating, but nothing around it has to (long view
+        // range, formation member). Any later full activation upgrades it.
+        void SetActiveObjectState(bool on, bool localOnly = false);
+        bool IsLocallyActiveObject() const { return m_isActiveObject && m_activeLocalOnly && !m_viewPoint.hasViewers(); }
 
         ViewPoint& GetViewPoint() { return m_viewPoint; }
 
@@ -1218,6 +1221,7 @@ virtual uint32 GetLevel() const = 0;
 
         ZoneScript* m_zoneScript;
         bool m_isActiveObject;
+        bool m_activeLocalOnly;
         // Extra visibility distance for this unit, only used if it is an active object.
         // c.f. GetVisibilityModifier(). Be very conservative using this - a large
         // draw distance can be expensive for updates with lots of players

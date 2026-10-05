@@ -258,14 +258,14 @@ bool GameObject::Create(uint32 guidlow, uint32 name_id, Map *map, float x, float
     {
         SetVisibilityModifier(VISIBILITY_DISTANCE_LARGE);
         if (sWorld.getConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS))
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
     }
 
     if (GetGOInfo()->IsInfiniteGameObject())
     {
         SetVisibilityModifier(MAX_VISIBILITY_DISTANCE);
         if (sWorld.getConfig(CONFIG_BOOL_VISIBILITY_FORCE_ACTIVE_OBJECTS))
-            SetActiveObjectState(true);
+            SetActiveObjectState(true, true);
     }
 
     //Notify the map's instance data.
