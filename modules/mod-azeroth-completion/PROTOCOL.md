@@ -168,7 +168,9 @@ Reasons: `LEVEL_TOO_LOW`, `LEVEL_TOO_HIGH`, `MISSING_PREREQUISITE`, `PREREQUISIT
 Why a storyline cannot progress: `s`, `q`, `qn`, `why`, `ml`, `mp`.
 
 ### MS
-Milestone: `m` percent, `got` claimed, `rw` reward description.
+Milestone: `m` percent, `got` claimed, `rw` reward description, `rx` the non-item part of `rw`,
+`it` reward items as `id:count,id:count`. An open milestone describes today's rewards; a claimed
+one describes what the claim granted, and claims recorded before rewards were kept have none.
 
 ### CUR / ZSUM
 `CUR`: `z`, `zn`, `a`, `an`, `tracked`. `ZSUM`: `id`, `n`, `pct`, `d`, `tot`, `lmin`, `lmax`,
@@ -196,7 +198,7 @@ After `HELLO`, the server pushes `EV` records (frame `E<n>`):
 |---|---|
 | `OBJECTIVE_COMPLETED` | `c` (`EXPLORATION`, `STORYLINE`, `RARE`, `ELITE`, `TRAVEL`), `id`, `n`, `cd`/`ct` category progress, `b` |
 | `CATEGORY_COMPLETED` | `c`, `cd`, `ct` |
-| `MILESTONE_REACHED` | `m` percent, `rw` rewards granted |
+| `MILESTONE_REACHED` | `m` percent, `rw` rewards granted, `it` items granted (`id:count,...`) |
 | `ZONE_COMPLETED` | `ver` |
 | `STORYLINE_PROGRESS` | `id`, `n`, `qd`, `qt`, `nx`, `nxn`, `nxs`, `nxg` |
 | `QUEST_BECAME_AVAILABLE` | `q`, `qn`, `id`/`n` storyline, `g` giver, `ga` giver area |

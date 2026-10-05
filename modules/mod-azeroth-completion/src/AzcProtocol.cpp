@@ -477,8 +477,15 @@ namespace Azc
                                 for (ObjectiveEval const& obj : ev.cats[c].objectives)
                                     WriteObjective(w, "OBJ", defs, ev, obj);
                         for (uint32 m : cfg.milestones)
-                            w.Rec("MS").Kv("m", m).Kv("got", state.milestones.count({ zone->zoneId, m }) != 0)
-                                .KvIf("rw", DescribeMilestoneRewards(player, *zone, m));
+                        {
+                            // A claimed milestone shows what it granted back then (nothing is
+                            // known for claims older than that record), an open one today's list.
+                            auto claim = state.milestones.find({ zone->zoneId, m });
+                            bool got = claim != state.milestones.end();
+                            RewardSummary reward = got ? claim->second : DescribeMilestoneRewards(player, *zone, m);
+                            w.Rec("MS").Kv("m", m).Kv("got", got)
+                                .KvIf("rw", reward.text).KvIf("rx", reward.extra).KvIf("it", reward.items);
+                        }
                     }
                 }
                 SendResponse(player, reqId, w);

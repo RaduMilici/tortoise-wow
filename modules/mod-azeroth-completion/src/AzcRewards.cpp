@@ -184,14 +184,19 @@ namespace Azc
             return "";
         }
 
-        std::string Run(Player* player, ZoneDef const& zone, uint32 percent, bool grant)
+        RewardSummary Run(Player* player, ZoneDef const& zone, uint32 percent, bool grant)
         {
-            std::string out;
+            RewardSummary out;
             for (RewardRow const& row : RowsFor(zone.zoneId, percent))
             {
                 std::string part = Apply(player, zone, percent, row, grant);
-                if (!part.empty())
-                    out += (out.empty() ? "" : ", ") + part;
+                if (part.empty())
+                    continue;
+                out.text += (out.text.empty() ? "" : ", ") + part;
+                if (row.type == "ITEM")
+                    out.items += (out.items.empty() ? "" : ",") + std::to_string(row.value1) + ":" + std::to_string(std::max(1, row.value2));
+                else
+                    out.extra += (out.extra.empty() ? "" : ", ") + part;
             }
             return out;
         }
@@ -227,12 +232,12 @@ namespace Azc
         return uint32(rows.size());
     }
 
-    std::string GrantMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
+    RewardSummary GrantMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
     {
         return Run(player, zone, percent, true);
     }
 
-    std::string DescribeMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
+    RewardSummary DescribeMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
     {
         return Run(player, zone, percent, false);
     }

@@ -2,6 +2,7 @@
 #define AZC_PROGRESS_H
 
 #include "AzcDefs.h"
+#include "AzcRewards.h"
 #include <deque>
 #include <functional>
 #include <unordered_set>
@@ -126,7 +127,7 @@ namespace Azc
         uint32 addonProtocol = 0;
         std::unordered_map<uint64, CompletionRecord> records;
         std::map<uint32, std::pair<time_t, uint32>> zonesEarned;    // zone -> (at, version)
-        std::set<std::pair<uint32, uint32>> milestones;             // (zone, percent)
+        std::map<std::pair<uint32, uint32>, RewardSummary> milestones;  // (zone, percent) -> what the claim granted
 
         // runtime only
         uint32 tickTimer = 0;

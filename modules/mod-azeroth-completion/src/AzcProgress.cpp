@@ -88,6 +88,17 @@ namespace Azc
 
         std::string ChatPrefix() { return "|cff33ff99[Azeroth Completion]|r "; }
 
+        // A quoted, escaped SQL string, or NULL when empty.
+        std::string SqlText(std::string text)
+        {
+            if (text.empty())
+                return "NULL";
+            if (text.size() > 1000)     // the column width
+                text.resize(1000);
+            CharacterDatabase.escape_string(text);
+            return "'" + text + "'";
+        }
+
         Event MakeEvent(char const* type, ZoneDef const& zone, ZoneEval const& eval)
         {
             Event e;
@@ -217,18 +228,25 @@ namespace Azc
             {
                 if (eval.percent < m || state.milestones.count({ zone.zoneId, m }))
                     continue;
-                state.milestones.insert({ zone.zoneId, m });
+                // Claimed before granting, so anything the grant sets off cannot claim it twice.
+                state.milestones[{ zone.zoneId, m }] = RewardSummary();
                 bool grant = allowRewards && cfg.rewardsEnabled && (!silent || cfg.rewardsRetroactive);
-                std::string reward = grant ? GrantMilestoneRewards(player, zone, m) : std::string();
-                CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_milestone` (`guid`, `zone_id`, `percent`, `claimed_at`, `rewarded`, `definition_version`) "
-                    "VALUES (%u, %u, %u, " UI64FMTD ", %u, %u)", state.guid, zone.zoneId, m, uint64(time(nullptr)), grant ? 1u : 0u, zone.version);
-                if (!silent || !reward.empty())
+                RewardSummary reward = grant ? GrantMilestoneRewards(player, zone, m) : RewardSummary();
+                state.milestones[{ zone.zoneId, m }] = reward;
+                // Keep what was granted: the journal shows it rather than today's reward list.
+                CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_milestone` (`guid`, `zone_id`, `percent`, `claimed_at`, `rewarded`, `definition_version`, "
+                    "`reward_text`, `reward_extra`, `reward_items`) VALUES (%u, %u, %u, " UI64FMTD ", %u, %u, %s, %s, %s)",
+                    state.guid, zone.zoneId, m, uint64(time(nullptr)), grant ? 1u : 0u, zone.version,
+                    SqlText(reward.text).c_str(), SqlText(reward.extra).c_str(), SqlText(reward.items).c_str());
+                if (!silent || !reward.text.empty())
                 {
                     Event e = MakeEvent("MILESTONE_REACHED", zone, eval);
                     e.fields.push_back({ "m", std::to_string(m) });
-                    if (!reward.empty())
-                        e.fields.push_back({ "rw", reward });
-                    e.chat = ChatPrefix() + zone.name + " " + std::to_string(m) + "% milestone reached!" + (reward.empty() ? "" : " Reward: " + reward);
+                    if (!reward.text.empty())
+                        e.fields.push_back({ "rw", reward.text });
+                    if (!reward.items.empty())
+                        e.fields.push_back({ "it", reward.items });
+                    e.chat = ChatPrefix() + zone.name + " " + std::to_string(m) + "% milestone reached!" + (reward.text.empty() ? "" : " Reward: " + reward.text);
                     events.push_back(e);
                 }
             }
@@ -335,7 +353,7 @@ namespace Azc
                 } while (result->NextRow());
             }
             if (std::unique_ptr<QueryResult> result{ CharacterDatabase.PQuery(
-                "SELECT `zone_id`, `percent` FROM `azcomp_character_milestone` WHERE `guid` = %u", state.guid) })
+                "SELECT `zone_id`, `percent`, `reward_text`, `reward_extra`, `reward_items` FROM `azcomp_character_milestone` WHERE `guid` = %u", state.guid) })
             {
                 do
                 {
@@ -343,7 +361,7 @@ namespace Azc
                     if (!f[0].GetUInt32() && !f[1].GetUInt32())
                         state.resync = true;
                     else
-                        state.milestones.insert({ f[0].GetUInt32(), f[1].GetUInt32() });
+                        state.milestones[{ f[0].GetUInt32(), f[1].GetUInt32() }] = { f[2].GetCppString(), f[3].GetCppString(), f[4].GetCppString() };
                 } while (result->NextRow());
             }
         }
@@ -998,7 +1016,7 @@ namespace Azc
         for (auto r = s.records.begin(); r != s.records.end();)
             r = (!zoneId || r->second.zoneId == zoneId) ? s.records.erase(r) : std::next(r);
         for (auto m = s.milestones.begin(); m != s.milestones.end();)
-            m = (!zoneId || m->first == zoneId) ? s.milestones.erase(m) : std::next(m);
+            m = (!zoneId || m->first.first == zoneId) ? s.milestones.erase(m) : std::next(m);
         for (auto c = s.catComplete.begin(); c != s.catComplete.end();)
             c = (!zoneId || c->first == zoneId) ? s.catComplete.erase(c) : std::next(c);
         if (zoneId)
