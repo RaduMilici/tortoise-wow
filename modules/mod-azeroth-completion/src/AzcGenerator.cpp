@@ -927,6 +927,13 @@ namespace Azc
                     ++excludedCounts["no_outdoor_zone"];
                     continue;
                 }
+                // A chain made only of placeholder quests ("[DEPRECATED] ...", "UNUSED ...") is not content.
+                if (std::all_of(ids.begin(), ids.end(), [&](uint32 id) { return IsTechnicalName(templates.find(id)->second->GetTitle()); }))
+                {
+                    ++excludedCounts["technical_name"];
+                    Exclude(zoneId, CAT_STORYLINE, ids[0], first->GetTitle(), "technical_name");
+                    continue;
+                }
                 if (ids.size() > m_cfg.maxStorylineQuests)
                 {
                     ++excludedCounts["oversized_chain"];
@@ -1017,7 +1024,8 @@ namespace Azc
 
                     // Conservative: anything we cannot prove obtainable and completable never counts.
                     std::string why;
-                    if (node.disabled)                                      why = "disabled";
+                    if (IsTechnicalName(node.title))                        why = "technical_name";
+                    else if (node.disabled)                                 why = "disabled";
                     else if (node.seasonal)                                 why = "seasonal";
                     else if (node.repeatable)                               why = "repeatable";
                     else if (q->GetRequiredCondition())                     why = "condition";
