@@ -111,7 +111,7 @@ are not invented.
 
 One-time milestones (`AzerothCompletion.Rewards.Milestones`, default 25/50/75/100) pay what
 `azcomp_milestone_reward` (world DB) lists. `zone_id = 0` rows apply to every zone; rows for a
-specific zone replace them at that percent.
+specific zone are given on top of them at that percent.
 
 | `reward_type` | `value1` | `value2` | `text` |
 |---|---|---|---|
@@ -122,10 +122,38 @@ specific zone replace them at that percent.
 | `REPUTATION` | faction id | amount | |
 | `ITEM` | item id | count (mailed if bags are full) | |
 | `SPELL` | spell id (cast on the player) | | description |
+| `TITLE` | title id (1-127, the core's `character_titles`) | | title name, for the reward text |
 | `HOOK` | | | hook name (C++: `AzerothCompletion::RegisterRewardHook`, see `src/AzerothCompletion.h`) |
 
 Milestones reached through retroactive progress are claimed without a reward unless
 `Rewards.Retroactive = 1`.
+
+### Zone sets
+
+Every zone also has its own themed set, generated from `tools/zone_rewards/zones.py` by
+`tools/zone_rewards/build.py`:
+
+| Milestone | Reward |
+|---|---|
+| 25% | 5× a fun consumable (10-minute disguise as a creature of the zone) |
+| 50% | a one-use teleport charm to a landmark of the zone |
+| 75% | 5× a zone buff (30 minutes, one zone buff at a time) and a shirt or cloak |
+| 100% | a tabard, a companion pet (added to the pet collection) and a title |
+
+The generator writes `data/sql/world/20261005120000_azeroth_completion_zone_rewards.sql`
+(items, spells, pets and the reward rows), `data/client/zone_reward_spells.json` (the same spells
+for the client; `make_client_patch.py` adds them to `Spell.dbc` in `patch-Z.mpq`) and, with
+`--addon <dir>`, the addon's `ZoneTitles.lua` (title names; the client has none for new ids).
+Re-run it after editing `zones.py` and ship all three together:
+
+```sh
+python3 modules/mod-azeroth-completion/tools/zone_rewards/build.py \
+  --addon ~/Documents/WoW/turtle-launcher/server/launcher-data/client/Interface/AddOns/AzerothCompletion
+python3 ~/Documents/WoW/make_client_patch.py
+```
+
+The DB updater tracks files by content hash, so a regenerated SQL file is applied again on the
+next start. It first deletes everything in its own id ranges, so re-applying is safe.
 
 ## Commands
 

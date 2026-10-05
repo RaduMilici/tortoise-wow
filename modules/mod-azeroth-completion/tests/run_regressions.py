@@ -160,9 +160,48 @@ int main() {
     std::cout << "PASS: inventory/mail quantities, reward previews, temporary quest branches, UTF-8/whitespace framing\n";
 }
 '''
+rows_code = r'''
+#include <cassert>
+#include <cstdint>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <vector>
+using uint32 = uint32_t;
+using int8 = int8_t;
+struct RewardRow { uint32 zoneId=0, percent=0; std::string type; int value1=0, value2=0; std::string text; };
+std::mutex rewardsMutex;
+std::vector<RewardRow> rows;
+struct Log { template<class... T> void outError(T...) {} } sLog;
+struct Player { std::vector<int> titles; void AwardTitle(int8 t) { titles.push_back(t); } };
+''' + between('AzcRewards.cpp', '        std::vector<RewardRow> RowsFor(', '        uint32 XpFor(') + '''
+std::string Title(Player* player, RewardRow const& row, bool grant) {
+''' + between('AzcRewards.cpp', '            if (row.type == "TITLE")', '            if (row.type == "HOOK")') + r'''
+    return "?";
+}
+int main() {
+    rows = {{0, 50, "XP", 0, 0, ""}, {40, 50, "ITEM", 0, 0, ""}, {12, 50, "ITEM", 0, 0, ""}, {0, 100, "XP", 0, 0, ""}, {40, 100, "TITLE", 0, 0, ""}};
+    auto westfall = RowsFor(40, 50);
+    assert(westfall.size() == 2 && westfall[0].type == "XP" && westfall[1].zoneId == 40);  // zone rows add to the generic ones
+    assert(RowsFor(1, 50).size() == 1);                                                   // other zones: generic only
+    assert(RowsFor(40, 25).empty());
+    Player p;
+    RewardRow title{40, 100, "TITLE", 71, 0, "Sentinel of Westfall"};
+    assert(Title(&p, title, false) == "title \"Sentinel of Westfall\"" && p.titles.empty());  // preview grants nothing
+    Title(&p, title, true);
+    assert(p.titles.size() == 1 && p.titles[0] == 71);
+    for (int bad : {0, -3, 128, 200}) {
+        RewardRow r = title; r.value1 = bad;
+        assert(Title(&p, r, true).empty() && p.titles.size() == 1);  // never a removal or a wrapped id
+    }
+    std::cout << "PASS: zone reward rows add to the generic ones, TITLE rewards\n";
+}
+'''
+
 with tempfile.TemporaryDirectory(prefix='azc-regressions-') as directory:
-    source = Path(directory) / 'regressions.cpp'
-    binary = Path(directory) / 'regressions'
-    source.write_text(code)
-    subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', str(source), '-o', str(binary)], check=True, timeout=30)
-    subprocess.run([str(binary)], check=True, timeout=5)
+    for name, program in (('regressions', code), ('reward_rows', rows_code)):
+        source = Path(directory) / f'{name}.cpp'
+        binary = Path(directory) / name
+        source.write_text(program)
+        subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', str(source), '-o', str(binary)], check=True, timeout=30)
+        subprocess.run([str(binary)], check=True, timeout=5)

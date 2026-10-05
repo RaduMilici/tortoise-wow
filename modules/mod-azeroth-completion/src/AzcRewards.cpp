@@ -42,18 +42,15 @@ namespace Azc
         std::vector<RewardRow> RowsFor(uint32 zoneId, uint32 percent)
         {
             std::lock_guard<std::mutex> lock(rewardsMutex);
-            // Zone-specific rows replace the generic (zone 0) ones for that milestone.
-            std::vector<RewardRow> specific, generic;
+            // The generic (zone 0) rows first, then the zone's own rows on top of them.
+            std::vector<RewardRow> out;
             for (RewardRow const& row : rows)
-            {
-                if (row.percent != percent)
-                    continue;
-                if (row.zoneId == zoneId)
-                    specific.push_back(row);
-                else if (row.zoneId == 0)
-                    generic.push_back(row);
-            }
-            return specific.empty() ? generic : specific;
+                if (row.percent == percent && row.zoneId == 0)
+                    out.push_back(row);
+            for (RewardRow const& row : rows)
+                if (row.percent == percent && row.zoneId != 0 && row.zoneId == zoneId)
+                    out.push_back(row);
+            return out;
         }
 
         uint32 XpFor(Player* player, RewardRow const& row)
@@ -149,6 +146,19 @@ namespace Azc
                 if (grant)
                     player->CastSpell(player, uint32(row.value1), true);
                 return row.text;
+            }
+            if (row.type == "TITLE")
+            {
+                // Player::AwardTitle takes an int8 and treats negative ids as removals.
+                if (row.value1 <= 0 || row.value1 > 127)
+                {
+                    if (grant)
+                        sLog.outError("[mod-azeroth-completion] TITLE reward %i is out of range (1-127).", row.value1);
+                    return "";
+                }
+                if (grant)
+                    player->AwardTitle(int8(row.value1));
+                return "title \"" + row.text + "\"";
             }
             if (row.type == "HOOK")
             {
