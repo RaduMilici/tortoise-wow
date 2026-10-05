@@ -154,6 +154,8 @@ python3 ~/Documents/WoW/make_client_patch.py
 
 The DB updater tracks files by content hash, so a regenerated SQL file is applied again on the
 next start. It first deletes everything in its own id ranges, so re-applying is safe.
+Keep the zone list in its original order so reward IDs stay stable. To stop awarding a zone's
+set, use `retired=True`; existing items, learned companions and title names remain available.
 
 ## Commands
 

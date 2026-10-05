@@ -9,6 +9,7 @@
 #
 # The order is fixed: a zone's position decides its item, spell, creature and title ids, so
 # append new zones at the end and never reorder or remove (retire a zone with retired=True).
+# Retired zones stop awarding rewards; their definitions stay available for existing owners.
 #
 # Buff presets are in build.py (BUFFS). Avoid ';' in texts (the DB updater splits on it).
 

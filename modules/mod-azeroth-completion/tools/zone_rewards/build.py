@@ -277,6 +277,10 @@ def build_sql(zones):
                  f"{zone.spell[1]}, `map`, `position_x`, `position_y`, `position_z`, `orientation` "
                  f"FROM `game_tele` WHERE `name` = {q(z['charm'][2])} LIMIT 1;")
         L.append(f"INSERT INTO `spell_group` (`group_id`, `group_spell_id`, `spell_id`) VALUES ({BUFF_GROUP}, {zone.i}, {zone.spell[0]});")
+        # Retirement stops new awards, but existing items and learned companions still
+        # need their definitions (and client spell/title names) after regeneration.
+        if z["retired"]:
+            continue
         rid = REWARD_ID_BASE + zone.i * 10
         rows = [(25, "ITEM", zone.item[5], COUNT_FUN, f"zone set: {z['fun'][0]}"),
                 (50, "ITEM", zone.item[3], 1, f"zone set: {z['charm'][0]}"),
@@ -287,8 +291,10 @@ def build_sql(zones):
                 (100, "TITLE", zone.title_id, 0, z["title"])]
         for n, (pct, kind, v1, v2, text) in enumerate(rows):
             rewards.append(f"({rid + n}, {zone.area}, {pct}, '{kind}', {v1}, {v2}, {q(text)})")
-    L += ["", "INSERT INTO `azcomp_milestone_reward` (`id`, `zone_id`, `percent`, `reward_type`, `value1`, `value2`, `text`) VALUES",
-          ",\n".join(rewards) + ";", "",
+    if rewards:
+        L += ["", "INSERT INTO `azcomp_milestone_reward` (`id`, `zone_id`, `percent`, `reward_type`, `value1`, `value2`, `text`) VALUES",
+              ",\n".join(rewards) + ";"]
+    L += ["",
           "DROP TEMPORARY TABLE `azc_tmp_item`;",
           "DROP TEMPORARY TABLE `azc_tmp_spell`;",
           "DROP TEMPORARY TABLE `azc_tmp_creature`;", ""]
@@ -316,13 +322,22 @@ def build_titles(zones):
 
 
 def check(zones):
-    if len(ZONES) > MAX_ZONES:
-        sys.exit(f"{len(ZONES)} zones; the id ranges hold {MAX_ZONES}")
-    if TITLE_BASE + len(ZONES) - 1 > 127:
-        sys.exit("title ids must stay <= 127")
+    if len(zones) > MAX_ZONES:
+        sys.exit(f"{len(zones)} zones; the id ranges hold {MAX_ZONES}")
     seen = {}
+    areas, indices = set(), set()
     for zone in zones:
         z = zone.z
+        if zone.i < 0 or zone.i >= MAX_ZONES or zone.i in indices:
+            sys.exit(f"{zone.name}: duplicate or out-of-range zone index {zone.i}")
+        indices.add(zone.i)
+        if not 1 <= zone.title_id <= 127:
+            sys.exit("title ids must stay within 1-127")
+        # A retired set may share its area with the set that replaced it: only one awards.
+        if zone.area <= 0 or (not z["retired"] and zone.area in areas):
+            sys.exit(f"{zone.name}: duplicate or invalid area id {zone.area}")
+        if not z["retired"]:
+            areas.add(zone.area)
         if z["buff"][3] not in BUFFS:
             sys.exit(f"{zone.name}: unknown buff preset {z['buff'][3]}")
         for key in ("title",):
@@ -340,7 +355,7 @@ def main():
     parser.add_argument("--addon", help="AzerothCompletion addon folder to write ZoneTitles.lua into")
     args = parser.parse_args()
 
-    zones = [Zone(i, z) for i, z in enumerate(ZONES) if not z["retired"]]
+    zones = [Zone(i, z) for i, z in enumerate(ZONES)]
     check(zones)
 
     os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
