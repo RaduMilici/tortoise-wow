@@ -189,7 +189,10 @@ mount each, the two continents with a title, and Azeroth itself with a title and
 ## Lore & Secrets
 
 Found lore is recorded like any objective (`azcomp_character_objective`, category 5, source
-`lore`). The lore rewards pay for how many a character has found, in total and secrets only
+`lore`; database source 7 for lore and 8 for secrets). Secret discoveries retain their credit
+when later definitions remove or reclassify the object. Older records are upgraded when the
+character logs in or definitions refresh, if the object is still classified as a secret.
+The lore rewards pay for how many a character has found, in total and secrets only
 (`azcomp_lore_reward`, world DB; same reward types as milestones, `MONEY_PER_LEVEL` uses the
 character's level, a `HOOK` gets zone 0 and the count). Each count pays once
 (`azcomp_character_lore`); the claims survive `.ac reset`, because found lore cannot be rebuilt

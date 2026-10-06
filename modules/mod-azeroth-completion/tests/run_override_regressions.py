@@ -71,7 +71,7 @@ code += between('AzcGenerator.cpp', '        void Generator::BuildTravel()', '  
 code += between('AzcGenerator.cpp', '        void Generator::Finish()', '        void Generator::BuildRegions()')
 code += between('AzcProgress.cpp', '    ZoneEval EvaluateZone(', '    RegionEval EvaluateRegion(')
 code += between('AzcProgress.cpp', '    RegionEval EvaluateRegion(', '    void WithState(')
-code += between('AzcProgress.cpp', '    bool IsNearLore(', '    QuestEval EvaluateQuest(')
+code += between('AzcProgress.cpp', '    Point const* NearestLoreSpawn(', '    QuestEval EvaluateQuest(')
 code += between('AzcGenerator.cpp', '        uint64 Fnv(', '        std::string Lower(')
 code += 'void Hash(std::shared_ptr<Definitions> m_defs) {\n'
 code += between('AzcGenerator.cpp', '            // Content hash of everything', '            std::unordered_map<uint32, std::pair<uint32, uint64>> stored;')
@@ -168,6 +168,11 @@ int main() {
         st.records[MakeObjectiveKey(CAT_RARE, 100)].zoneId=1;       // same key, other category
         found=LoreFound(st, defs);
         check(found[LORE_KIND_ANY]==2 && found[LORE_KIND_SECRET]==1, "lore found earlier still counts after it is dropped");
+        st.records[MakeObjectiveKey(CAT_LORE, 101)].source=SOURCE_SECRET;
+        zone.lore[1].secret=false;
+        check(LoreFound(st, defs)[LORE_KIND_SECRET]==1, "reclassified secret keeps its discovery credit");
+        defs.loreByKey.erase(101);
+        check(LoreFound(st, defs)[LORE_KIND_SECRET]==1, "removed secret keeps its discovery credit");
         zone.lore[0].bonus=false;
         ev=EvaluateZone(&player, st, defs, zone, false);
         check(ev.cats[CAT_LORE].visible && !ev.allDone && ev.percent<100, "mandatory lore counts towards the zone");
@@ -199,6 +204,10 @@ int main() {
         check(!IsNearLore(l, 0, 100.0f, 100.0f, 20.0f, 6.0f), "a floor above or below does not");
         check(IsNearLore(l, 0, 500.0f, 505.0f, 0.0f, 6.0f), "any copy in the zone will do");
         check(!IsNearLore(l, 1, 100.0f, 100.0f, 10.0f, 6.0f), "the same spot on another map does not");
+        check(NearestLoreSpawn(l, 0, 500.0f, 505.0f, 20.0f)==&l.spawns[1], "suggest the nearby copy even when the first is far away");
+        check(!NearestLoreSpawn(l, 1, 500.0f, 505.0f, 20.0f), "suggestions exclude copies on other maps");
+        check(!NearestLoreSpawn(l, 0, 300.0f, 300.0f, 20.0f), "suggestions exclude distant copies");
+        check(NearestLoreSpawn(l, 0, 100.0f, 106.0f, 6.0f)==&l.spawns[0], "suggestions include the range boundary");
         l.scale = 2.0f;
         check(IsNearLore(l, 0, 110.0f, 100.0f, 10.0f, 6.0f), "a big monument is found from further away");
         check(!IsNearLore(l, 0, 113.0f, 100.0f, 10.0f, 6.0f), "but not from anywhere");

@@ -378,6 +378,22 @@ namespace Azc
         void SyncLore(Player* player, PlayerState& state, Definitions const& defs, bool allowRewards, std::vector<Event>& events)
         {
             Settings const& cfg = GetConfig();
+            // Upgrade old discoveries while their secret classification is still available.
+            for (auto& record : state.records)
+            {
+                if (Category(record.first >> 32) != CAT_LORE || record.second.source == SOURCE_SECRET)
+                    continue;
+                uint32 key = uint32(record.first);
+                auto ref = defs.loreByKey.find(key);
+                if (ref == defs.loreByKey.end())
+                    continue;
+                ZoneDef const* zone = defs.FindZone(ref->second.zoneId);
+                if (!zone || !zone->lore[ref->second.index].secret)
+                    continue;
+                record.second.source = SOURCE_SECRET;
+                CharacterDatabase.PExecute("UPDATE `azcomp_character_objective` SET `source` = %u WHERE `guid` = %u AND `category` = %u AND `objective` = %u",
+                    uint32(SOURCE_SECRET), state.guid, uint32(CAT_LORE), key);
+            }
             std::array<uint32, LORE_KIND_COUNT> found = LoreFound(state, defs);
             for (uint8 k = 0; k < LORE_KIND_COUNT; ++k)
             {
@@ -435,7 +451,7 @@ namespace Azc
                 if (!IsNearLore(lore, map, px, py, pz, cfg.loreRange))
                     continue;
 
-                Record(state, CAT_LORE, lore.key, zone->zoneId, zone->version, SOURCE_LORE);
+                Record(state, CAT_LORE, lore.key, zone->zoneId, zone->version, lore.secret ? SOURCE_SECRET : SOURCE_LORE);
                 any = true;
                 std::array<uint32, LORE_KIND_COUNT> found = LoreFound(state, defs);
                 LoreKind kind = lore.secret ? LORE_KIND_SECRET : LORE_KIND_ANY;
@@ -534,7 +550,8 @@ namespace Azc
             case SOURCE_QUEST:   return "quest";
             case SOURCE_TAXI:    return "taxi";
             case SOURCE_ADMIN:   return "admin";
-            case SOURCE_LORE:    return "lore";
+            case SOURCE_LORE:
+            case SOURCE_SECRET:  return "lore";
             default:             return "unknown";
         }
     }
@@ -555,6 +572,25 @@ namespace Azc
     uint8 PlayerTeamMask(Player const* player)
     {
         return player->GetTeam() == ALLIANCE ? TEAM_MASK_ALLIANCE : TEAM_MASK_HORDE;
+    }
+
+    Point const* NearestLoreSpawn(LoreObjective const& lore, uint32 map, float x, float y, float range)
+    {
+        Point const* nearest = nullptr;
+        float best = range * range;
+        for (Point const& p : lore.spawns)
+        {
+            if (p.map != map)
+                continue;
+            float dx = p.x - x, dy = p.y - y;
+            float distance = dx * dx + dy * dy;
+            if (distance <= best)
+            {
+                best = distance;
+                nearest = &p;
+            }
+        }
+        return nearest;
     }
 
     bool IsNearLore(LoreObjective const& lore, uint32 map, float x, float y, float z, float range)
@@ -578,7 +614,13 @@ namespace Azc
             if (Category(r.first >> 32) != CAT_LORE)
                 continue;
             ++found[LORE_KIND_ANY];
-            // A found object stays found, even when a later generation drops it.
+            // Preserve the classification at discovery even if the object is removed or moved.
+            if (r.second.source == SOURCE_SECRET)
+            {
+                ++found[LORE_KIND_SECRET];
+                continue;
+            }
+            // Legacy records have no saved classification; use the current definition.
             auto ref = defs.loreByKey.find(uint32(r.first & 0xFFFFFFFF));
             if (ref != defs.loreByKey.end())
                 if (ZoneDef const* zone = defs.FindZone(ref->second.zoneId))

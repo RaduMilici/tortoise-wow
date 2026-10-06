@@ -21,7 +21,8 @@ namespace Azc
         SOURCE_QUEST   = 4,
         SOURCE_TAXI    = 5,
         SOURCE_ADMIN   = 6,
-        SOURCE_LORE    = 7      // walked up to a lore object
+        SOURCE_LORE    = 7,     // walked up to a lore object
+        SOURCE_SECRET  = 8      // preserves secret credit when definitions change
     };
     char const* SourceName(uint8 source);
 
@@ -186,6 +187,9 @@ namespace Azc
     };
 
     uint8 PlayerTeamMask(Player const* player);
+
+    // Closest copy within the horizontal suggestion range on the same map.
+    Point const* NearestLoreSpawn(LoreObjective const& lore, uint32 map, float x, float y, float range);
 
     // Whether a character at (map, x, y, z) is close enough to any copy of a lore object to find
     // it: within `range` yards of its centre, scaled up by the object's size.

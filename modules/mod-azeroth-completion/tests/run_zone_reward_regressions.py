@@ -19,7 +19,11 @@ class ZoneRewardTests(unittest.TestCase):
     def test_checked_in_outputs_are_current(self):
         zones = [build.Zone(i, z) for i, z in enumerate(build.ZONES)]
         build.check(zones)
+        build.check_regions(zones)
+        build.check_lore()
         self.assertEqual(Path(build.SQL_OUT).read_text(), build.build_sql(zones))
+        self.assertEqual(Path(build.REGION_SQL_OUT).read_text(), build.build_region_sql())
+        self.assertEqual(Path(build.LORE_SQL_OUT).read_text(), build.build_lore_sql())
         self.assertEqual(json.loads(Path(build.JSON_OUT).read_text()), build.build_client(zones))
 
     def test_retirement_preserves_owned_rewards_through_cli(self):
@@ -29,6 +33,8 @@ class ZoneRewardTests(unittest.TestCase):
             sql, client = Path(directory) / 'world.sql', Path(directory) / 'spells.json'
             with patch.object(build, 'ZONES', definitions), \
                     patch.object(build, 'SQL_OUT', str(sql)), \
+                    patch.object(build, 'REGION_SQL_OUT', str(Path(directory) / 'regions.sql')), \
+                    patch.object(build, 'LORE_SQL_OUT', str(Path(directory) / 'lore.sql')), \
                     patch.object(build, 'JSON_OUT', str(client)), \
                     patch.object(sys, 'argv', ['build.py', '--addon', directory]), \
                     contextlib.redirect_stdout(io.StringIO()):

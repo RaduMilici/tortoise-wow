@@ -904,11 +904,12 @@ namespace Azc
             LoreObjective const& l = zone.lore[obj.index];
             if (obj.done || obj.hidden || l.secret || l.spawns.empty())
                 continue;
-            float d = distanceTo(l.spawns.front());
-            if (d < 0.0f || d > cfg.suggestionRange / 2)
+            Point const* nearest = NearestLoreSpawn(l, player->GetMapId(), player->GetPositionX(),
+                player->GetPositionY(), cfg.suggestionRange / 2);
+            if (!nearest)
                 continue;
-            std::string where = l.areaId ? " (" + defs.AreaName(l.areaId) + ")" : "";
-            add("lore", ObjectiveId(CAT_LORE, obj.key), "Read: " + l.name + where, true, l.spawns.front());
+            // areaId describes the first copy and may not describe the nearest one.
+            add("lore", ObjectiveId(CAT_LORE, obj.key), "Read: " + l.name, true, *nearest);
         }
 
         // Nearest first; things without a known spot after everything in range.
