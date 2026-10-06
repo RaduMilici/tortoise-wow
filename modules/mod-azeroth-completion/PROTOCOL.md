@@ -76,7 +76,8 @@ replaces the name with `???` and leaves out coordinates and loot; with `2` nothi
 | `GET_STORYLINE` | `<id or storyline:id>` | `STORY`, `EXG`…, `QUEST`…, `QOBJ`… |
 | `GET_CURRENT_PROGRESS` | `[all]` | `CUR`, `ZSUM` per zone (zones with progress only, unless `all=1`) |
 | `GET_SUGGESTIONS` | `[zoneId]` | `ZONE`, `SUG`… |
-| `GET_HISTORY` | `[limit]` (default 20, max 100) | `HIST`… newest first, `ZDONE`… |
+| `GET_HISTORY` | `[limit]` (default 20, max 100) | `HIST`… newest first, `ZDONE`…, `RDONE`… |
+| `GET_REGIONS` | | per region in display order: `REGION`, then `RZ` per zone |
 | `SEARCH` | `<text>` (2+ letters, may contain spaces) | `HIT`… (max 40, then `MORE`), or `NOHIT` |
 
 `zoneId` 0 or omitted = the zone the character is in. `category` is `exploration`, `storylines`,
@@ -187,8 +188,18 @@ Search result: `k` (`zone`, `exploration`, `storyline`, `quest`, `rare`, `elite`
 `q` quest id for quests. Only content for the character's faction; unkilled rares and elites are
 never returned unless the server reveals hidden information.
 
-### HIST / ZDONE
-`HIST`: `id`, `c`, `n`, `z`, `zn`, `at`, `src`. `ZDONE`: `z`, `zn`, `at`, `ver`.
+### HIST / ZDONE / RDONE
+`HIST`: `id`, `c`, `n`, `z`, `zn`, `at`, `src`. `ZDONE`: `z`, `zn`, `at`, `ver`. `RDONE`: region
+`r`, `rn`, `at`.
+
+### REGION / RZ
+A region is a group of zones with a reward for completing all of them.
+`REGION`: `id`, `n`, `desc`, `icon` texture path, `d` zones completed, `tot` zones that count,
+`done` every zone that counts is complete, `earned` the completion is recorded (never revoked),
+`at` when, and the reward as in `MS`: `rw`, `rx`, `it` (what it granted once earned, else what
+it would grant).
+`RZ`: `r` region, `z`, `zn`, `pct`, `earned`, `app` (0 = nothing in this zone for the character,
+so it does not count), `lmin`/`lmax`.
 
 ## Events
 
@@ -204,6 +215,7 @@ After `HELLO`, the server pushes `EV` records (frame `E<n>`):
 | `QUEST_BECAME_AVAILABLE` | `q`, `qn`, `id`/`n` storyline, `g` giver, `ga` giver area |
 | `DEFINITION_UPDATED` | `gen`, `zones` = `zoneId:version,...` changed; re-request what is on screen |
 | `RETROACTIVE` | `count` objectives recognised from existing character data at login |
+| `REGION_COMPLETED` | `r`, `rn` region name, `zc` zones, `rw`/`rx`/`it` rewards granted (no zone fields) |
 
 Every zone event also has `z`, `zn` and `zp` (zone percent after the change). Example:
 

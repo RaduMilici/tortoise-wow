@@ -157,6 +157,24 @@ next start. It first deletes everything in its own id ranges, so re-applying is 
 Keep the zone list in its original order so reward IDs stay stable. To stop awarding a zone's
 set, use `retired=True`; existing items, learned companions and title names remain available.
 
+## Regions
+
+Regions group zones (`azcomp_region`, world DB): a list of zones (`azcomp_region_zone`), every
+zone of a map, or every zone. When a character has completed every zone of a region that has
+something for them, the region is complete: recorded in `azcomp_character_region`, announced
+(`REGION_COMPLETED`) and rewarded once from `azcomp_region_reward` (same reward types as
+milestones; `MONEY_PER_LEVEL` uses the region's highest zone level, a `HOOK` gets zone 0 and the
+region id). A zone with nothing for the character, such as another faction's capital, does not
+count, and zones without a checklist are left out, so a region never waits on unreachable
+content. Completed regions are never taken away; `.ac reset <character> all` clears them.
+
+Completing a region pays even when it happens at login (it is made of real, completed zones),
+but not while progress is rebuilt after an admin reset.
+
+The default regions come from `tools/zone_rewards/regions.py` (generated into
+`data/sql/world/20261006120000_azeroth_completion_regions.sql`): eight areas of the world with a
+mount each, the two continents with a title, and Azeroth itself with a title and an epic mount.
+
 ## Commands
 
 | Command | Who | |
@@ -165,6 +183,7 @@ set, use `retired=True`; existing items, learned companions and title names rema
 | `.ac missing [zone]` | player | what is missing, with the next quest of each storyline and where it starts |
 | `.ac progress` | player | most complete zones |
 | `.ac suggest` | player | nearby things to do now |
+| `.ac regions` | player | progress in every region, with the zones left |
 | `.ac status` | moderator | generator totals and log |
 | `.ac inspect <zone>` | moderator | the zone's generated checklist and every exclusion with its reason |
 | `.ac inspect-story <id>` | moderator | storyline graph (any of its quest ids works), with the selected player's state |
