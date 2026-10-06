@@ -25,8 +25,19 @@ namespace Azc
             std::string text;
         };
 
+        // Who is being rewarded for what: a zone milestone or a completed region.
+        struct RewardContext
+        {
+            uint32 zoneId = 0;      // 0 for a region
+            uint32 regionId = 0;
+            uint32 percent = 0;
+            uint32 levelMax = 0;
+            std::string mailBody;   // for reward items sent by mail
+        };
+
         std::mutex rewardsMutex;
         std::vector<RewardRow> rows;
+        std::vector<RewardRow> regionRows;     // zoneId holds the region id
         std::map<std::string, AzerothCompletion::RewardHook> hooks;
 
         std::string Money(uint32 copper)
@@ -61,15 +72,25 @@ namespace Azc
             return player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) * uint32(std::max(0, row.value1)) / 100;
         }
 
-        uint32 MoneyFor(ZoneDef const& zone, RewardRow const& row)
+        std::vector<RewardRow> RowsForRegion(uint32 regionId)
+        {
+            std::lock_guard<std::mutex> lock(rewardsMutex);
+            std::vector<RewardRow> out;
+            for (RewardRow const& row : regionRows)
+                if (row.zoneId == regionId)
+                    out.push_back(row);
+            return out;
+        }
+
+        uint32 MoneyFor(RewardContext const& ctx, RewardRow const& row)
         {
             if (row.type == "MONEY")
                 return uint32(std::max(0, row.value1));
             // MONEY_PER_LEVEL: scales with the zone, so high zones pay more
-            return uint32(std::max(0, row.value1)) * std::max<uint32>(1, zone.levelMax);
+            return uint32(std::max(0, row.value1)) * std::max<uint32>(1, ctx.levelMax);
         }
 
-        std::string Apply(Player* player, ZoneDef const& zone, uint32 percent, RewardRow const& row, bool grant)
+        std::string Apply(Player* player, RewardContext const& ctx, RewardRow const& row, bool grant)
         {
             if (row.type == "XP" || row.type == "XP_PCT")
             {
@@ -82,7 +103,7 @@ namespace Azc
             }
             if (row.type == "MONEY" || row.type == "MONEY_PER_LEVEL")
             {
-                uint32 copper = MoneyFor(zone, row);
+                uint32 copper = MoneyFor(ctx, row);
                 if (!copper)
                     return "";
                 if (grant)
@@ -130,7 +151,7 @@ namespace Azc
                             }
                             item->SaveToDB(true);
                             MailDraft draft;
-                            draft.SetSubjectAndBody("Azeroth Completion", zone.name + " " + std::to_string(percent) + "% milestone reward.");
+                            draft.SetSubjectAndBody("Azeroth Completion", ctx.mailBody);
                             draft.AddItem(item);
                             draft.SendMailTo(MailReceiver(player), MailSender(MAIL_NORMAL, uint32(0), MAIL_STATIONERY_GM));
                             remaining -= stack;
@@ -175,8 +196,9 @@ namespace Azc
                         sLog.outError("[mod-azeroth-completion] Reward hook '%s' is not registered.", row.text.c_str());
                     return "";
                 }
+                // A region reward calls the hook with zone 0 and the region id as "percent".
                 if (grant)
-                    hook(player, zone.zoneId, percent);
+                    hook(player, ctx.zoneId, ctx.regionId ? ctx.regionId : ctx.percent);
                 return "";
             }
             if (grant)
@@ -184,12 +206,12 @@ namespace Azc
             return "";
         }
 
-        RewardSummary Run(Player* player, ZoneDef const& zone, uint32 percent, bool grant)
+        RewardSummary Run(Player* player, RewardContext const& ctx, std::vector<RewardRow> const& list, bool grant)
         {
             RewardSummary out;
-            for (RewardRow const& row : RowsFor(zone.zoneId, percent))
+            for (RewardRow const& row : list)
             {
-                std::string part = Apply(player, zone, percent, row, grant);
+                std::string part = Apply(player, ctx, row, grant);
                 if (part.empty())
                     continue;
                 out.text += (out.text.empty() ? "" : ", ") + part;
@@ -199,6 +221,26 @@ namespace Azc
                     out.extra += (out.extra.empty() ? "" : ", ") + part;
             }
             return out;
+        }
+
+        RewardSummary RunZone(Player* player, ZoneDef const& zone, uint32 percent, bool grant)
+        {
+            RewardContext ctx;
+            ctx.zoneId = zone.zoneId;
+            ctx.percent = percent;
+            ctx.levelMax = zone.levelMax;
+            ctx.mailBody = zone.name + " " + std::to_string(percent) + "% milestone reward.";
+            return Run(player, ctx, RowsFor(zone.zoneId, percent), grant);
+        }
+
+        RewardSummary RunRegion(Player* player, RegionDef const& region, bool grant)
+        {
+            RewardContext ctx;
+            ctx.regionId = region.id;
+            ctx.percent = 100;
+            ctx.levelMax = region.levelMax;
+            ctx.mailBody = region.name + " completion reward.";
+            return Run(player, ctx, RowsForRegion(region.id), grant);
         }
     }
 
@@ -222,24 +264,53 @@ namespace Azc
                 loaded.push_back(row);
             } while (result->NextRow());
         }
+        std::vector<RewardRow> loadedRegion;
+        if (std::unique_ptr<QueryResult> result{ WorldDatabase.Query(
+            "SELECT `region_id`, `reward_type`, `value1`, `value2`, `text` FROM `azcomp_region_reward` ORDER BY `id`") })
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                RewardRow row;
+                row.zoneId = f[0].GetUInt32();
+                row.percent = 100;
+                row.type = f[1].GetCppString();
+                std::transform(row.type.begin(), row.type.end(), row.type.begin(), ::toupper);
+                row.value1 = f[2].GetInt32();
+                row.value2 = f[3].GetInt32();
+                row.text = f[4].GetCppString();
+                loadedRegion.push_back(row);
+            } while (result->NextRow());
+        }
         std::lock_guard<std::mutex> lock(rewardsMutex);
         rows = std::move(loaded);
+        regionRows = std::move(loadedRegion);
     }
 
     uint32 RewardRowCount()
     {
         std::lock_guard<std::mutex> lock(rewardsMutex);
-        return uint32(rows.size());
+        return uint32(rows.size() + regionRows.size());
     }
 
     RewardSummary GrantMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
     {
-        return Run(player, zone, percent, true);
+        return RunZone(player, zone, percent, true);
     }
 
     RewardSummary DescribeMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
     {
-        return Run(player, zone, percent, false);
+        return RunZone(player, zone, percent, false);
+    }
+
+    RewardSummary GrantRegionRewards(Player* player, RegionDef const& region)
+    {
+        return RunRegion(player, region, true);
+    }
+
+    RewardSummary DescribeRegionRewards(Player* player, RegionDef const& region)
+    {
+        return RunRegion(player, region, false);
     }
 }
 

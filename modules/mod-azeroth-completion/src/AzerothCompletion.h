@@ -10,6 +10,9 @@
 //   {
 //       ...
 //   });
+//
+// The same works in azcomp_region_reward; a region reward calls the hook with zoneId = 0 and
+// the region id in place of the percent.
 
 #include "Common.h"
 #include <functional>

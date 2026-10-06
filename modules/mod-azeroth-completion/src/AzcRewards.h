@@ -16,7 +16,7 @@ namespace Azc
         std::string items;
     };
 
-    // Loads azcomp_milestone_reward (world DB). Safe to call again for a reload.
+    // Loads azcomp_milestone_reward and azcomp_region_reward (world DB). Safe to call again for a reload.
     void LoadRewards();
     uint32 RewardRowCount();
 
@@ -26,6 +26,10 @@ namespace Azc
 
     // Describes what a milestone would grant, without granting it.
     RewardSummary DescribeMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent);
+
+    // The same for completing a region (azcomp_region_reward).
+    RewardSummary GrantRegionRewards(Player* player, RegionDef const& region);
+    RewardSummary DescribeRegionRewards(Player* player, RegionDef const& region);
 }
 
 #endif

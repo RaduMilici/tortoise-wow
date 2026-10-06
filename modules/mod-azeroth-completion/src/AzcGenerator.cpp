@@ -195,6 +195,7 @@ namespace Azc
             void BuildStorylines();
             void FillNpcRef(NpcRef& ref, StarterKind kind, uint32 entry, uint32 preferZone);
             void Finish();
+            void BuildRegions();
             void AssignVersions();
 
             Definitions const* m_previous;
@@ -1317,6 +1318,93 @@ namespace Azc
             Log(line.str());
         }
 
+        void Generator::BuildRegions()
+        {
+            std::multimap<uint32, uint32> listed;
+            if (std::unique_ptr<QueryResult> result{ WorldDatabase.Query("SELECT `region_id`, `zone_id` FROM `azcomp_region_zone`") })
+            {
+                do
+                {
+                    Field* fields = result->Fetch();
+                    listed.emplace(fields[0].GetUInt32(), fields[1].GetUInt32());
+                } while (result->NextRow());
+            }
+
+            std::unique_ptr<QueryResult> result(WorldDatabase.Query(
+                "SELECT `id`, `name`, `description`, `scope`, `map_id`, `sort_order`, `icon` FROM `azcomp_region`"));
+            if (!result)
+                return;
+
+            uint32 dropped = 0;
+            std::vector<std::string> unknown;
+            do
+            {
+                Field* fields = result->Fetch();
+                RegionDef region;
+                region.id = fields[0].GetUInt32();
+                region.name = fields[1].GetCppString();
+                region.description = fields[2].GetCppString();
+                region.scope = fields[3].GetUInt8();
+                region.mapId = fields[4].GetUInt32();
+                region.sortOrder = fields[5].GetInt32();
+                region.icon = fields[6].GetCppString();
+
+                // Zones without a checklist are left out, so a region never waits on them.
+                if (region.scope == REGION_SCOPE_ZONES)
+                {
+                    auto range = listed.equal_range(region.id);
+                    for (auto itr = range.first; itr != range.second; ++itr)
+                    {
+                        if (m_defs->FindZone(itr->second))
+                            region.zones.push_back(itr->second);
+                        else
+                            unknown.push_back(region.name + ":" + std::to_string(itr->second));
+                    }
+                }
+                else
+                {
+                    for (auto const& pair : m_defs->zones)
+                        if (region.scope == REGION_SCOPE_ALL || pair.second.mapId == region.mapId)
+                            region.zones.push_back(pair.first);
+                }
+                if (region.zones.empty())
+                {
+                    ++dropped;
+                    continue;
+                }
+                std::sort(region.zones.begin(), region.zones.end(), [&](uint32 a, uint32 b)
+                {
+                    ZoneDef const& za = m_defs->zones[a];
+                    ZoneDef const& zb = m_defs->zones[b];
+                    return za.levelMin != zb.levelMin ? za.levelMin < zb.levelMin : za.name < zb.name;
+                });
+                for (uint32 z : region.zones)
+                    region.levelMax = std::max(region.levelMax, m_defs->zones[z].levelMax);
+                m_defs->regions[region.id] = std::move(region);
+            } while (result->NextRow());
+
+            for (auto const& pair : m_defs->regions)
+                m_defs->regionOrder.push_back(pair.first);
+            std::sort(m_defs->regionOrder.begin(), m_defs->regionOrder.end(), [&](uint32 a, uint32 b)
+            {
+                RegionDef const& ra = m_defs->regions[a];
+                RegionDef const& rb = m_defs->regions[b];
+                return ra.sortOrder != rb.sortOrder ? ra.sortOrder < rb.sortOrder : a < b;
+            });
+
+            std::ostringstream line;
+            line << "Regions: " << m_defs->regions.size();
+            if (dropped)
+                line << ", " << dropped << " without any zone";
+            if (!unknown.empty())
+            {
+                line << "; zones without a checklist left out:";
+                for (std::string const& u : unknown)
+                    line << " " << u;
+            }
+            Log(line.str());
+        }
+
         void Generator::AssignVersions()
         {
             // Content hash of everything that changes what a player must do.
@@ -1390,6 +1478,7 @@ namespace Azc
             BuildCreatures();
             BuildStorylines();
             Finish();
+            BuildRegions();
             AssignVersions();
 
             Log("Generated in " + std::to_string(WorldTimer::getMSTimeDiff(start, WorldTimer::getMSTime())) + " ms");

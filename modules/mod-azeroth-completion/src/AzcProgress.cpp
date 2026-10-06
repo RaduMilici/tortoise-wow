@@ -10,6 +10,7 @@
 #include "Player.h"
 #include "QuestDef.h"
 #include "ScriptMgr.h"
+#include <algorithm>
 #include <cmath>
 #include <mutex>
 
@@ -256,6 +257,7 @@ namespace Azc
             {
                 time_t now = time(nullptr);
                 state.zonesEarned[zone.zoneId] = { now, zone.version };
+                state.regionCheck = true;
                 CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_zone` (`guid`, `zone_id`, `completed_at`, `definition_version`) VALUES (%u, %u, " UI64FMTD ", %u)",
                     state.guid, zone.zoneId, uint64(now), zone.version);
                 if (!silent)
@@ -317,6 +319,58 @@ namespace Azc
                 SyncZone(player, state, defs, pair.second, silent, events, allowRewards);
         }
 
+        // Records regions whose zones are now all complete. Completing a region always pays
+        // (it takes real, completed zones), except while progress is rebuilt after a reset.
+        void SyncRegions(Player* player, PlayerState& state, Definitions const& defs, bool allowRewards, std::vector<Event>& events)
+        {
+            if (!state.regionCheck)
+                return;
+            state.regionCheck = false;
+            Settings const& cfg = GetConfig();
+            ZoneBriefCache cache;
+            for (uint32 id : defs.regionOrder)
+            {
+                if (state.regionsEarned.count(id))
+                    continue;
+                RegionDef const& region = defs.regions.at(id);
+                // Every zone completed needs no evaluation; otherwise the unfinished ones may
+                // still have nothing for this character and so not count.
+                RegionEval re;
+                if (std::all_of(region.zones.begin(), region.zones.end(), [&](uint32 z) { return state.zonesEarned.count(z) != 0; }))
+                {
+                    re.total = re.done = uint32(region.zones.size());
+                    re.complete = true;
+                }
+                else
+                    re = EvaluateRegion(player, state, defs, region, false, &cache);
+                if (!re.complete)
+                    continue;
+
+                time_t now = time(nullptr);
+                state.regionsEarned[id] = RegionClaim{ now, RewardSummary() };      // claimed before granting
+                bool grant = allowRewards && cfg.rewardsEnabled;
+                RewardSummary reward = grant ? GrantRegionRewards(player, region) : RewardSummary();
+                state.regionsEarned[id].reward = reward;
+                CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_region` (`guid`, `region_id`, `completed_at`, `rewarded`, "
+                    "`reward_text`, `reward_extra`, `reward_items`) VALUES (%u, %u, " UI64FMTD ", %u, %s, %s, %s)",
+                    state.guid, id, uint64(now), grant ? 1u : 0u, SqlText(reward.text).c_str(), SqlText(reward.extra).c_str(), SqlText(reward.items).c_str());
+
+                Event e;
+                e.type = "REGION_COMPLETED";
+                e.fields.push_back({ "r", std::to_string(id) });
+                e.fields.push_back({ "rn", region.name });
+                e.fields.push_back({ "zc", std::to_string(re.total) });
+                if (!reward.text.empty())
+                    e.fields.push_back({ "rw", reward.text });
+                if (!reward.extra.empty())
+                    e.fields.push_back({ "rx", reward.extra });
+                if (!reward.items.empty())
+                    e.fields.push_back({ "it", reward.items });
+                e.chat = ChatPrefix() + "|cffffd100Region complete: " + region.name + "!|r" + (reward.text.empty() ? "" : " Reward: " + reward.text);
+                events.push_back(e);
+            }
+        }
+
         void FinishReset(PlayerState& state)
         {
             if (!state.resync)
@@ -350,6 +404,15 @@ namespace Azc
                 {
                     Field* f = result->Fetch();
                     state.zonesEarned[f[0].GetUInt32()] = { time_t(f[1].GetUInt64()), f[2].GetUInt32() };
+                } while (result->NextRow());
+            }
+            if (std::unique_ptr<QueryResult> result{ CharacterDatabase.PQuery(
+                "SELECT `region_id`, `completed_at`, `reward_text`, `reward_extra`, `reward_items` FROM `azcomp_character_region` WHERE `guid` = %u", state.guid) })
+            {
+                do
+                {
+                    Field* f = result->Fetch();
+                    state.regionsEarned[f[0].GetUInt32()] = RegionClaim{ time_t(f[1].GetUInt64()), { f[2].GetCppString(), f[3].GetCppString(), f[4].GetCppString() } };
                 } while (result->NextRow());
             }
             if (std::unique_ptr<QueryResult> result{ CharacterDatabase.PQuery(
@@ -755,6 +818,60 @@ namespace Azc
         return ev;
     }
 
+    RegionEval EvaluateRegion(Player* player, PlayerState const& state, Definitions const& defs, RegionDef const& region, bool withPercent,
+        ZoneBriefCache* cache)
+    {
+        RegionEval re;
+        re.region = &region;
+        auto claim = state.regionsEarned.find(region.id);
+        if (claim != state.regionsEarned.end())
+        {
+            re.earned = true;
+            re.earnedAt = claim->second.at;
+        }
+        for (uint32 zoneId : region.zones)
+        {
+            ZoneDef const* zone = defs.FindZone(zoneId);
+            if (!zone)
+                continue;
+            RegionZoneEval rz;
+            rz.zone = zone;
+            rz.earned = state.zonesEarned.count(zoneId) != 0;
+            rz.applicable = rz.earned;
+            if (!rz.earned || withPercent)
+            {
+                auto cached = cache ? cache->find(zoneId) : ZoneBriefCache::iterator();
+                if (cache && cached != cache->end())
+                {
+                    rz.percent = cached->second.first;
+                    rz.applicable = rz.applicable || cached->second.second;
+                }
+                else
+                {
+                    // A zone with nothing for this character (another faction's city, say) does not count.
+                    ZoneEval ev = EvaluateZone(player, state, defs, *zone, false);
+                    bool visible = false;
+                    for (CategoryEval const& ce : ev.cats)
+                        visible = visible || ce.visible;
+                    rz.percent = ev.percent;
+                    rz.applicable = rz.applicable || visible;
+                    if (cache)
+                        (*cache)[zoneId] = { ev.percent, visible };
+                }
+            }
+            else
+                rz.percent = 100;
+            if (rz.applicable)
+            {
+                ++re.total;
+                re.done += rz.earned ? 1 : 0;
+            }
+            re.zones.push_back(rz);
+        }
+        re.complete = re.total > 0 && re.done == re.total;
+        return re;
+    }
+
     void WithState(Player* player, std::function<void(PlayerState*)> const& fn)
     {
         std::lock_guard<std::recursive_mutex> lock(storeMutex);
@@ -780,7 +897,10 @@ namespace Azc
 
         size_t before = s.records.size();
         std::vector<Event> events;
-        SyncAll(player, s, *defs, true, events, !s.resync);   // retroactive: explored areas, rewarded quests, known flight paths
+        bool allowRewards = !s.resync;
+        SyncAll(player, s, *defs, true, events, allowRewards);   // retroactive: explored areas, rewarded quests, known flight paths
+        s.regionCheck = true;       // regions added since the last login, or zones completed before them
+        SyncRegions(player, s, *defs, allowRewards, events);
         FinishReset(s);
         s.generation = defs->generation;
         s.exploredSig = ExploredSignature(player);
@@ -816,6 +936,7 @@ namespace Azc
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_objective` WHERE `guid` = %u", guidLow);
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_zone` WHERE `guid` = %u", guidLow);
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u", guidLow);
+        CharacterDatabase.PExecute("DELETE FROM `azcomp_character_region` WHERE `guid` = %u", guidLow);
     }
 
     void ProgressOnUpdate(Player* player, uint32 diff)
@@ -846,6 +967,7 @@ namespace Azc
         if (state->resync && state->generation == defs->generation)
         {
             SyncAll(player, *state, *defs, true, events, false);
+            SyncRegions(player, *state, *defs, false, events);
             FinishReset(*state);
         }
         if (state->generation != defs->generation)
@@ -856,7 +978,10 @@ namespace Azc
             state->catComplete.clear();
             state->storyUnits.clear();
             state->availableQuests.clear();
-            SyncAll(player, *state, *defs, true, events, !state->resync);
+            bool allowRewards = !state->resync;
+            SyncAll(player, *state, *defs, true, events, allowRewards);
+            state->regionCheck = true;      // the regions may have changed too
+            SyncRegions(player, *state, *defs, allowRewards, events);
             FinishReset(*state);
             state->generation = defs->generation;
             Event e;
@@ -914,6 +1039,7 @@ namespace Azc
         for (uint32 z : zones)
             if (ZoneDef const* zone = defs->FindZone(z))
                 SyncZone(player, *state, *defs, *zone, false, events);
+        SyncRegions(player, *state, *defs, true, events);
 
         DeliverEvents(player, *state, events);
     }
@@ -951,12 +1077,14 @@ namespace Azc
         if (state->resync)
         {
             SyncAll(player, *state, *defs, true, events, false);
+            SyncRegions(player, *state, *defs, false, events);
             FinishReset(*state);
         }
         Record(*state, cat, entry, zone->zoneId, zone->version, SOURCE_KILL);
         ZoneEval eval = EvaluateZone(player, *state, *defs, *zone, false);
         events.push_back(MakeObjectiveEvent(*zone, eval, cat, entry, obj.name, obj.bonus));
         SyncZone(player, *state, *defs, *zone, false, events);
+        SyncRegions(player, *state, *defs, true, events);
         DeliverEvents(player, *state, events);
     }
 
@@ -1003,6 +1131,8 @@ namespace Azc
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_objective` WHERE `guid` = %u", guidLow);
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_zone` WHERE `guid` = %u", guidLow);
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u", guidLow);
+            // A one-zone reset keeps completed regions (they are never taken away); a full reset does not.
+            CharacterDatabase.PExecute("DELETE FROM `azcomp_character_region` WHERE `guid` = %u", guidLow);
         }
 
         // Persist this for offline characters and logouts before the next update.
@@ -1028,6 +1158,7 @@ namespace Azc
         {
             s.zonesEarned.clear();
             s.baselined.clear();
+            s.regionsEarned.clear();
         }
         // Retroactive data (explored areas, quests, flight paths) is picked up again silently.
         s.resync = true;

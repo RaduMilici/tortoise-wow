@@ -91,7 +91,7 @@ struct MailDraft {
     }
 };
 struct RewardRow { std::string type="ITEM"; int value1=1, value2=1; };
-struct Zone { std::string name="Westfall"; };
+struct RewardContext { std::string mailBody="Westfall 25% milestone reward."; };
 '''
 
 item_branch = between('AzcRewards.cpp', '            if (row.type == "ITEM")', '            if (row.type == "SPELL")')
@@ -99,7 +99,7 @@ quest_branch = between('AzcProgress.cpp', '        if (!player->SatisfyQuestExcl
 code = preamble
 code += between('AzcProtocol.cpp', '        void SendFramed(', '        void SendResponse(')
 code += between('AzcProtocol.cpp', '    std::string Escape(', '    RecordWriter& RecordWriter::Rec(')
-code += 'std::string Reward(Player* player, RewardRow row, bool grant) { Zone zone; uint32 percent=25;\n' + item_branch + '\nreturn ""; }\n'
+code += 'std::string Reward(Player* player, RewardRow row, bool grant) { RewardContext ctx;\n' + item_branch + '\nreturn ""; }\n'
 code += '''
 bool Permanent(Player* player) {
     Quest q; Quest const* quest=&q;

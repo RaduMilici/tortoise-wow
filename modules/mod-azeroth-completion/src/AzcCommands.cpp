@@ -204,6 +204,41 @@ namespace Azc
         return true;
     }
 
+    bool HandleAcRegions(ChatHandler* handler, char* /*args*/)
+    {
+        Player* player = Self(handler);
+        DefinitionsPtr defs = RequireDefs(handler);
+        if (!player || !defs)
+            return true;
+        WithState(player, [&](PlayerState* state)
+        {
+            if (!state)
+                return;
+            if (defs->regionOrder.empty())
+            {
+                handler->SendSysMessage("No regions are defined.");
+                return;
+            }
+            handler->SendSysMessage("|cffffd100Regions|r");
+            ZoneBriefCache cache;
+            for (uint32 id : defs->regionOrder)
+            {
+                RegionDef const& region = defs->regions.at(id);
+                RegionEval re = EvaluateRegion(player, *state, *defs, region, false, &cache);
+                std::string left;
+                if (!re.earned)
+                    for (RegionZoneEval const& rz : re.zones)
+                        if (rz.applicable && !rz.earned)
+                            left += (left.empty() ? "" : ", ") + rz.zone->name;
+                if (left.size() > 120)
+                    left = left.substr(0, 117) + "...";
+                handler->PSendSysMessage("  %s%-26s|r %u / %u zones%s%s", re.earned ? "|cffffd100" : "|cffffffff", region.name.c_str(), re.done, re.total,
+                    re.earned ? " - complete" : "", left.empty() ? "" : ("  (left: " + left + ")").c_str());
+            }
+        });
+        return true;
+    }
+
     bool HandleAcSuggest(ChatHandler* handler, char* /*args*/)
     {
         Player* player = Self(handler);
@@ -254,7 +289,7 @@ namespace Azc
             defs->generation, uint32(defs->zones.size()), counts[0], counts[1], uint32(defs->quests.size()), counts[2], counts[3], counts[4]);
         for (std::string const& line : defs->globalLog)
             handler->PSendSysMessage("  %s", line.c_str());
-        handler->PSendSysMessage("Tracked characters online: %u. Milestone reward rows: %u.", ProgressTrackedPlayers(), RewardRowCount());
+        handler->PSendSysMessage("Regions: %u. Tracked characters online: %u. Reward rows: %u.", uint32(defs->regions.size()), ProgressTrackedPlayers(), RewardRowCount());
         return true;
     }
 
@@ -536,6 +571,7 @@ namespace Azc
             { "missing",           SEC_PLAYER,        false, nullptr, "What is missing in a zone: .ac missing [zone]", nullptr, 0, "", 0, &HandleAcMissing },
             { "progress",          SEC_PLAYER,        false, nullptr, "Your most complete zones", nullptr, 0, "", 0, &HandleAcProgress },
             { "suggest",           SEC_PLAYER,        false, nullptr, "Nearby objectives you can do now", nullptr, 0, "", 0, &HandleAcSuggest },
+            { "regions",           SEC_PLAYER,        false, nullptr, "Your progress in every region", nullptr, 0, "", 0, &HandleAcRegions },
             { "status",            SEC_MODERATOR,     true,  nullptr, "Generator status and totals", nullptr, 0, "", 0, &HandleAcStatus },
             { "inspect",           SEC_MODERATOR,     true,  nullptr, "Generated checklist of a zone, with exclusions: .ac inspect <zone>", nullptr, 0, "", 0, &HandleAcInspect },
             { "inspect-story",     SEC_MODERATOR,     false, nullptr, "Quest graph of a storyline: .ac inspect-story <id>", nullptr, 0, "", 0, &HandleAcInspectStory },

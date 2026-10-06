@@ -67,8 +67,9 @@ public:
 code += between('AzcGenerator.cpp', '                // Apply forced requirements', '                for (QuestNode& n : nodes)\n                {\n                    if (n.optional)\n                        ++optionalQuests;')
 code += '\n} while (false); return story; } };\n'
 code += between('AzcGenerator.cpp', '        void Generator::BuildTravel()', '        void Generator::BuildCreatures()')
-code += between('AzcGenerator.cpp', '        void Generator::Finish()', '        void Generator::AssignVersions()')
-code += between('AzcProgress.cpp', '    ZoneEval EvaluateZone(', '    void WithState(')
+code += between('AzcGenerator.cpp', '        void Generator::Finish()', '        void Generator::BuildRegions()')
+code += between('AzcProgress.cpp', '    ZoneEval EvaluateZone(', '    RegionEval EvaluateRegion(')
+code += between('AzcProgress.cpp', '    RegionEval EvaluateRegion(', '    void WithState(')
 code += between('AzcGenerator.cpp', '        uint64 Fnv(', '        std::string Lower(')
 code += 'void Hash(std::shared_ptr<Definitions> m_defs) {\n'
 code += between('AzcGenerator.cpp', '            // Content hash of everything', '            std::unordered_map<uint32, std::pair<uint32, uint64>> stored;')
@@ -118,6 +119,29 @@ int main() {
     mandatory.BuildTravel(); bonus.BuildTravel();
     Hash(mandatory.m_defs); Hash(bonus.m_defs);
     check(mandatory.Zone(1).contentHash!=bonus.Zone(1).contentHash, "changing travel bonus status changes definition hash");
+
+    // Regions: a zone with nothing for this character does not count; completed zones do.
+    {
+        Definitions defs;
+        ZoneDef& done = defs.zones[1]; done.zoneId=1;
+        ExplorationObjective explored; explored.areaId=10; done.exploration.push_back(explored);
+        ZoneDef& horde = defs.zones[2]; horde.zoneId=2;
+        TravelObjective hordeNode; hordeNode.nodeId=5; hordeNode.teamMask=TEAM_MASK_HORDE; horde.travel.push_back(hordeNode);
+        ZoneDef& open = defs.zones[3]; open.zoneId=3;
+        TravelObjective node; node.nodeId=6; node.teamMask=TEAM_MASK_BOTH; open.travel.push_back(node);
+        RegionDef region; region.id=1; region.zones={1, 2};
+        PlayerState st; st.zonesEarned[1]={1, 1};
+        ZoneBriefCache cache;
+        RegionEval re=EvaluateRegion(&player, st, defs, region, false, &cache);
+        check(re.total==1 && re.done==1 && re.complete, "zone with nothing for the character does not hold a region back");
+        region.zones={1, 2, 3};
+        re=EvaluateRegion(&player, st, defs, region, true, &cache);
+        check(re.total==2 && re.done==1 && !re.complete, "unfinished applicable zone keeps a region open");
+        check(re.zones.size()==3 && !re.zones[1].applicable && re.zones[2].applicable, "region lists every zone with its applicability");
+        st.regionsEarned[1]=RegionClaim{ 5, {} };
+        re=EvaluateRegion(&player, st, defs, region, false, &cache);
+        check(re.earned && !re.complete, "earned region stays earned while new zones are open");
+    }
     return failures ? 1:0;
 }
 '''

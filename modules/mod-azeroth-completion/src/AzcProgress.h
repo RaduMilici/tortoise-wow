@@ -113,6 +113,32 @@ namespace Azc
         uint32 newSinceEarned = 0;          // objectives added by a later definition version
     };
 
+    // One zone as part of a region.
+    struct RegionZoneEval
+    {
+        ZoneDef const* zone = nullptr;
+        bool earned = false;                // completed at some point (never revoked)
+        bool applicable = false;            // has something for this character (else it does not count)
+        uint32 percent = 0;                 // only filled when asked for
+    };
+
+    struct RegionEval
+    {
+        RegionDef const* region = nullptr;
+        std::vector<RegionZoneEval> zones;
+        uint32 done = 0;                    // applicable zones completed
+        uint32 total = 0;                   // applicable zones
+        bool complete = false;              // every applicable zone completed
+        bool earned = false;                // region completion recorded (never revoked)
+        time_t earnedAt = 0;
+    };
+
+    struct RegionClaim
+    {
+        time_t at = 0;
+        RewardSummary reward;               // what completing it granted (empty for old or unrewarded claims)
+    };
+
     struct Event
     {
         std::string type;
@@ -128,6 +154,7 @@ namespace Azc
         std::unordered_map<uint64, CompletionRecord> records;
         std::map<uint32, std::pair<time_t, uint32>> zonesEarned;    // zone -> (at, version)
         std::map<std::pair<uint32, uint32>, RewardSummary> milestones;  // (zone, percent) -> what the claim granted
+        std::map<uint32, RegionClaim> regionsEarned;
 
         // runtime only
         uint32 tickTimer = 0;
@@ -139,6 +166,7 @@ namespace Azc
         uint64 questSig = 0;
         uint32 generation = 0;
         bool resync = false;                // rebuild without rewards after reset; persisted as milestone (0, 0)
+        bool regionCheck = false;           // a zone was completed: look at the regions
         std::map<uint32, uint32> storyUnits;
         std::set<std::pair<uint32, uint8>> catComplete;
         std::map<uint32, std::set<uint32>> availableQuests;
@@ -172,6 +200,11 @@ namespace Azc
     ZoneEval EvaluateZone(Player* player, PlayerState const& state, Definitions const& defs, ZoneDef const& zone, bool withQuestDetail = true);
     StorylineEval EvaluateStoryline(Player* player, PlayerState const& state, Definitions const& defs, Storyline const& story);
     QuestEval EvaluateQuest(Player* player, QuestNode const& node);
+    // withPercent also evaluates completed zones, for display. `cache` (zone -> percent, applicable)
+    // lets several regions share the zone evaluations.
+    using ZoneBriefCache = std::unordered_map<uint32, std::pair<uint32, bool>>;
+    RegionEval EvaluateRegion(Player* player, PlayerState const& state, Definitions const& defs, RegionDef const& region, bool withPercent,
+        ZoneBriefCache* cache = nullptr);
 
     // Admin: forget one character's progress in one zone (0 = every zone). Works offline.
     void ResetProgress(uint32 guidLow, uint32 zoneId);

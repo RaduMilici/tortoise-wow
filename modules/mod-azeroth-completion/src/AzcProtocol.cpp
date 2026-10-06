@@ -603,6 +603,29 @@ namespace Azc
                 return;
             }
 
+            if (cmd == "GET_REGIONS")
+            {
+                ZoneBriefCache cache;
+                for (uint32 id : defs.regionOrder)
+                {
+                    RegionDef const& region = defs.regions.at(id);
+                    RegionEval re = EvaluateRegion(player, state, defs, region, true, &cache);
+                    // A completed region shows what it granted, an open one what it would grant.
+                    auto claim = state.regionsEarned.find(id);
+                    RewardSummary reward = claim != state.regionsEarned.end() ? claim->second.reward : DescribeRegionRewards(player, region);
+                    w.Rec("REGION").Kv("id", id).Kv("n", region.name).KvIf("desc", region.description).KvIf("icon", region.icon)
+                        .Kv("d", re.done).Kv("tot", re.total).Kv("done", re.earned || re.complete).Kv("earned", re.earned)
+                        .KvIf("rw", reward.text).KvIf("rx", reward.extra).KvIf("it", reward.items);
+                    if (re.earnedAt)
+                        w.Kv("at", uint64(re.earnedAt));
+                    for (RegionZoneEval const& rz : re.zones)
+                        w.Rec("RZ").Kv("r", id).Kv("z", rz.zone->zoneId).Kv("zn", rz.zone->name).Kv("pct", rz.percent)
+                            .Kv("earned", rz.earned).Kv("app", rz.applicable).Kv("lmin", rz.zone->levelMin).Kv("lmax", rz.zone->levelMax);
+                }
+                SendResponse(player, reqId, w);
+                return;
+            }
+
             if (cmd == "GET_HISTORY")
             {
                 uint32 limit = std::min<uint32>(100, std::max<uint32>(1, uint32(std::strtoul(arg(0).empty() ? "20" : arg(0).c_str(), nullptr, 10))));
@@ -633,6 +656,9 @@ namespace Azc
                 }
                 for (auto const& z : state.zonesEarned)
                     w.Rec("ZDONE").Kv("z", z.first).Kv("zn", defs.AreaName(z.first)).Kv("at", uint64(z.second.first)).Kv("ver", z.second.second);
+                for (auto const& r : state.regionsEarned)
+                    if (RegionDef const* region = defs.FindRegion(r.first))
+                        w.Rec("RDONE").Kv("r", r.first).Kv("rn", region->name).Kv("at", uint64(r.second.at));
                 SendResponse(player, reqId, w);
                 return;
             }

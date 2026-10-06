@@ -7250,6 +7250,195 @@
     "effectApplyAuraName1": 56,
     "effectMiscValue1": 60543
    }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64201,
+    "name": "Lion's Pride Charger",
+    "spellIconId": 1176,
+    "description": "Summons and dismisses Lion's Pride Charger, a reward for completing The Kingdom of Azeroth. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 14559
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64202,
+    "name": "Khaz Modan Battle Ram",
+    "spellIconId": 1177,
+    "description": "Summons and dismisses Khaz Modan Battle Ram, a reward for completing Khaz Modan. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 14745
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64203,
+    "name": "Lordaeron Deathcharger",
+    "spellIconId": 1241,
+    "description": "Summons and dismisses Lordaeron Deathcharger, a reward for completing Lordaeron. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 80313
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64204,
+    "name": "Sunstrider Unicorn",
+    "spellIconId": 1176,
+    "description": "Summons and dismisses Sunstrider Unicorn, a reward for completing Quel'Thalas. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 40045
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64205,
+    "name": "Islander's Sea Turtle",
+    "spellIconId": 2050,
+    "description": "Summons and dismisses Islander's Sea Turtle, a reward for completing The Isles. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 17266
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64206,
+    "name": "Grovewarden Stag",
+    "spellIconId": 2122,
+    "description": "Summons and dismisses Grovewarden Stag, a reward for completing Northern Kalimdor. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 50097
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64207,
+    "name": "Crossroads War Kodo",
+    "spellIconId": 1684,
+    "description": "Summons and dismisses Crossroads War Kodo, a reward for completing The Heart of Kalimdor. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 81102
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64208,
+    "name": "Un'Goro Ravasaur",
+    "spellIconId": 1584,
+    "description": "Summons and dismisses Un'Goro Ravasaur, a reward for completing Southern Kalimdor. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 6507
+   }
+  },
+  {
+   "template": 50059,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64211,
+    "name": "Azerothian Champion's Charger",
+    "spellIconId": 1179,
+    "description": "Summons and dismisses Azerothian Champion's Charger, a reward for completing Azeroth. How fast it runs depends on your Riding skill.",
+    "auraDescription": "Mounted.",
+    "effectMiscValue1": 80160
+   }
   }
  ]
 }

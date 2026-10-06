@@ -202,6 +202,27 @@ namespace Azc
         std::vector<Exclusion> excluded;
     };
 
+    // A group of zones with a reward for completing all of them (azcomp_region).
+    enum RegionScope : uint8
+    {
+        REGION_SCOPE_ZONES = 0,     // the zones listed in azcomp_region_zone
+        REGION_SCOPE_MAP   = 1,     // every zone of mapId
+        REGION_SCOPE_ALL   = 2      // every zone with a checklist
+    };
+
+    struct RegionDef
+    {
+        uint32 id = 0;
+        std::string name;
+        std::string description;
+        std::string icon;               // texture path for the addon
+        uint8 scope = REGION_SCOPE_ZONES;
+        uint32 mapId = 0;
+        int32 sortOrder = 0;
+        uint32 levelMax = 0;            // highest level of its zones (MONEY_PER_LEVEL rewards)
+        std::vector<uint32> zones;      // zones with a checklist, by level
+    };
+
     struct ObjectiveRef
     {
         uint32 zoneId = 0;
@@ -215,6 +236,8 @@ namespace Azc
         std::map<uint32, ZoneDef> zones;
         std::unordered_map<uint32, QuestNode> quests;   // only quests that belong to a storyline
         std::unordered_map<uint32, Storyline> storylines;
+        std::map<uint32, RegionDef> regions;
+        std::vector<uint32> regionOrder;                // display order
 
         // lookups
         std::unordered_map<uint32, ObjectiveRef> explorationByArea;
@@ -236,6 +259,11 @@ namespace Azc
         {
             auto itr = storylines.find(id);
             return itr == storylines.end() ? nullptr : &itr->second;
+        }
+        RegionDef const* FindRegion(uint32 id) const
+        {
+            auto itr = regions.find(id);
+            return itr == regions.end() ? nullptr : &itr->second;
         }
         QuestNode const* FindQuest(uint32 id) const
         {

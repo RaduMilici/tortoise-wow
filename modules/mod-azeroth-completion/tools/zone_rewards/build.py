@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the zone completion rewards from zones.py.
+"""Generate the zone and region completion rewards from zones.py and regions.py.
 
 Writes:
   data/sql/world/20261005120000_azeroth_completion_zone_rewards.sql   items, spells, pets, rewards
-  data/client/zone_reward_spells.json    the same spells for the client's Spell.dbc
+  data/sql/world/20261006120000_azeroth_completion_regions.sql        regions, their mounts and rewards
+  data/client/zone_reward_spells.json    the spells of both for the client's Spell.dbc
                                          (~/Documents/WoW/make_client_patch.py packs them)
   <addon>/ZoneTitles.lua                 title names for the character sheet (--addon DIR)
 
@@ -19,11 +20,13 @@ import json
 import os
 import sys
 
+from regions import REGIONS
 from zones import ZONES
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.path.dirname(os.path.dirname(HERE))
 SQL_OUT = os.path.join(MODULE, "data/sql/world/20261005120000_azeroth_completion_zone_rewards.sql")
+REGION_SQL_OUT = os.path.join(MODULE, "data/sql/world/20261006120000_azeroth_completion_regions.sql")
 JSON_OUT = os.path.join(MODULE, "data/client/zone_reward_spells.json")
 
 # Id ranges (zone index i = position in ZONES).
@@ -35,6 +38,14 @@ REWARD_ID_BASE = 100000                     # azcomp_milestone_reward ids owned 
 BUFF_GROUP = 64000                          # spell_group: one zone buff at a time
 MAX_ZONES = 50
 
+# Regions (region id r): mount item REGION_ITEM_BASE + r, mount spell REGION_SPELL_BASE + r,
+# azcomp_region_reward ids REGION_REWARD_BASE + r * 10 + n.
+REGION_ITEM_BASE = 93800
+REGION_SPELL_BASE = 64200
+REGION_REWARD_BASE = 1000
+MAX_REGION_ID = 49
+REGION_TITLES = range(120, 128)
+
 # Templates the rows are copied from.
 T_CONSUMABLE_ITEM = 13452   # Elixir of the Mongoose: a plain usable consumable
 T_PET_ITEM = 36500          # Sunfire Fox: Turtle's "add companion to collection" item
@@ -43,6 +54,8 @@ T_BUFF_SPELL = 17538        # Elixir of the Mongoose buff
 T_TELEPORT_SPELL = 8690     # Hearthstone (10 sec cast, teleport effect)
 T_PET_SPELL = 36500         # Sunfire Fox summon (SPELL_EFFECT_SUMMON_CRITTER)
 T_FUN_SPELL = 26157         # PX-238 Winter Wondervolt (transform aura)
+T_MOUNT_ITEM = 83159        # Grim Totem Kodo: Turtle's "add mount to collection" item
+T_MOUNT_SPELL = 50059       # Grim Totem Kodo mount (speed follows the Riding skill)
 
 COUNT_FUN, COUNT_BUFF = 5, 5
 
@@ -301,10 +314,140 @@ def build_sql(zones):
     return "\n".join(L)
 
 
+# --- regions ----------------------------------------------------------------------------------
+
+REGION_SCHEMA = [
+    "CREATE TABLE IF NOT EXISTS `azcomp_region` (",
+    "  `id` INT UNSIGNED NOT NULL COMMENT 'stable: character progress refers to it',",
+    "  `name` VARCHAR(100) NOT NULL,",
+    "  `description` VARCHAR(255) NOT NULL DEFAULT '',",
+    "  `scope` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 the zones in azcomp_region_zone, 1 every zone of map_id, 2 every zone',",
+    "  `map_id` INT UNSIGNED NOT NULL DEFAULT 0,",
+    "  `sort_order` INT NOT NULL DEFAULT 0,",
+    "  `icon` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'texture path shown by the addon',",
+    "  PRIMARY KEY (`id`)",
+    ") ENGINE=MyISAM DEFAULT CHARSET=utf8mb3 COMMENT='Azeroth Completion regions';",
+    "",
+    "CREATE TABLE IF NOT EXISTS `azcomp_region_zone` (",
+    "  `region_id` INT UNSIGNED NOT NULL,",
+    "  `zone_id` INT UNSIGNED NOT NULL,",
+    "  PRIMARY KEY (`region_id`, `zone_id`)",
+    ") ENGINE=MyISAM DEFAULT CHARSET=utf8mb3 COMMENT='Azeroth Completion: zones of a region (scope 0)';",
+    "",
+    "CREATE TABLE IF NOT EXISTS `azcomp_region_reward` (",
+    "  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,",
+    "  `region_id` INT UNSIGNED NOT NULL,",
+    "  `reward_type` VARCHAR(16) NOT NULL COMMENT 'as azcomp_milestone_reward; MONEY_PER_LEVEL uses the highest zone level',",
+    "  `value1` INT NOT NULL DEFAULT 0,",
+    "  `value2` INT NOT NULL DEFAULT 0,",
+    "  `text` VARCHAR(255) NOT NULL DEFAULT '',",
+    "  PRIMARY KEY (`id`),",
+    "  KEY `idx_region` (`region_id`)",
+    ") ENGINE=MyISAM DEFAULT CHARSET=utf8mb3 COMMENT='Azeroth Completion: reward for completing a region';",
+]
+SCOPES = {"zones": 0, "map": 1, "all": 2}
+
+
+def region_spells(r):
+    if not r["mount"]:
+        return []
+    name, creature, icon, _, _ = r["mount"]
+    return [(T_MOUNT_SPELL, dict(COMMON_SPELL, entry=REGION_SPELL_BASE + r["id"], name=name, spellIconId=icon,
+             description=f"Summons and dismisses {name}, a reward for completing {r['name']}. "
+                         "How fast it runs depends on your Riding skill.",
+             auraDescription="Mounted.", effectMiscValue1=creature))]
+
+
+def build_region_sql():
+    ids = [r["id"] for r in REGIONS]
+    id_list = ", ".join(str(i) for i in ids)
+    last_item = REGION_ITEM_BASE + MAX_REGION_ID
+    last_spell = REGION_SPELL_BASE + MAX_REGION_ID
+    L = [
+        "-- Azeroth Completion: regions (groups of zones) and their completion rewards.",
+        "-- GENERATED by tools/zone_rewards/build.py from tools/zone_rewards/regions.py. Do not edit by hand.",
+        "--",
+        f"-- Owns: regions {id_list}, items {REGION_ITEM_BASE}-{last_item}, spells {REGION_SPELL_BASE}-{last_spell}",
+        f"-- (also in the client patch), azcomp_region_reward ids {REGION_REWARD_BASE}-{REGION_REWARD_BASE + MAX_REGION_ID * 10 + 9}.",
+        "",
+    ] + REGION_SCHEMA + [
+        "",
+        f"DELETE FROM `azcomp_region` WHERE `id` IN ({id_list});",
+        f"DELETE FROM `azcomp_region_zone` WHERE `region_id` IN ({id_list});",
+        f"DELETE FROM `azcomp_region_reward` WHERE `id` BETWEEN {REGION_REWARD_BASE} AND {REGION_REWARD_BASE + MAX_REGION_ID * 10 + 9};",
+        f"DELETE FROM `item_template` WHERE `entry` BETWEEN {REGION_ITEM_BASE} AND {last_item};",
+        f"DELETE FROM `spell_template` WHERE `entry` BETWEEN {REGION_SPELL_BASE} AND {last_spell};",
+        f"DELETE FROM `collection_mount` WHERE `itemId` BETWEEN {REGION_ITEM_BASE} AND {last_item};",
+        "",
+        "DROP TEMPORARY TABLE IF EXISTS `azc_tmp_item`;",
+        "DROP TEMPORARY TABLE IF EXISTS `azc_tmp_spell`;",
+        "CREATE TEMPORARY TABLE `azc_tmp_item` LIKE `item_template`;",
+        "CREATE TEMPORARY TABLE `azc_tmp_spell` LIKE `spell_template`;",
+    ]
+    regions, zones, rewards = [], [], []
+    for order, r in enumerate(REGIONS):
+        rid = r["id"]
+        regions.append(f"({rid}, {q(r['name'])}, {q(r['description'])}, {SCOPES[r['scope']]}, {r['map_id']}, {order}, {q(r['icon'])})")
+        zones += [f"({rid}, {z})" for z in r["zones"]]
+        rows = []
+        if r["money"]:
+            rows.append(("MONEY", r["money"], 0, "region"))
+        if r["mount"]:
+            name, _, _, look, flavour = r["mount"]
+            item = REGION_ITEM_BASE + rid
+            L += ["", f"-- {r['name']}: {name}"]
+            fields = dict(clear_item(spells=False), entry=item, name=name, description=flavour,
+                          quality=4 if r["scope"] != "zones" else 3, max_count=1, stackable=1)
+            copy_row(L, "item_template", "azc_tmp_item", T_MOUNT_ITEM, fields,
+                     [f"`display_id` = (SELECT `display_id` FROM `item_template` WHERE `entry` = {look})"])
+            for template, spell in region_spells(r):
+                copy_row(L, "spell_template", "azc_tmp_spell", template, spell)
+            L.append(f"INSERT INTO `collection_mount` (`itemId`, `spellId`) VALUES ({item}, {REGION_SPELL_BASE + rid});")
+            rows.append(("ITEM", item, 1, "region mount"))
+        if r["title"]:
+            rows.append(("TITLE", r["title"][0], 0, r["title"][1]))
+        for n, (kind, v1, v2, text) in enumerate(rows):
+            rewards.append(f"({REGION_REWARD_BASE + rid * 10 + n}, {rid}, '{kind}', {v1}, {v2}, {q(text)})")
+    L += ["",
+          "INSERT INTO `azcomp_region` (`id`, `name`, `description`, `scope`, `map_id`, `sort_order`, `icon`) VALUES",
+          ",\n".join(regions) + ";",
+          "INSERT INTO `azcomp_region_zone` (`region_id`, `zone_id`) VALUES",
+          ",\n".join(zones) + ";",
+          "INSERT INTO `azcomp_region_reward` (`id`, `region_id`, `reward_type`, `value1`, `value2`, `text`) VALUES",
+          ",\n".join(rewards) + ";",
+          "",
+          "DROP TEMPORARY TABLE `azc_tmp_item`;",
+          "DROP TEMPORARY TABLE `azc_tmp_spell`;", ""]
+    return "\n".join(L)
+
+
+def check_regions(zones):
+    ids, titles = set(), set(z.title_id for z in zones)
+    known_areas = set(z.area for z in zones)
+    for r in REGIONS:
+        if not 1 <= r["id"] <= MAX_REGION_ID or r["id"] in ids:
+            sys.exit(f"region {r['name']}: duplicate or out-of-range id {r['id']}")
+        ids.add(r["id"])
+        if r["scope"] not in SCOPES:
+            sys.exit(f"region {r['name']}: unknown scope {r['scope']}")
+        if (r["scope"] == "zones") != bool(r["zones"]):
+            sys.exit(f"region {r['name']}: scope 'zones' needs a zone list, and only it")
+        for z in r["zones"]:
+            if z not in known_areas:
+                print(f"note: region {r['name']} lists zone {z}, which has no zone set in zones.py")
+        if r["title"]:
+            if r["title"][0] not in REGION_TITLES or r["title"][0] in titles:
+                sys.exit(f"region {r['name']}: title id {r['title'][0]} is taken or outside {REGION_TITLES}")
+            titles.add(r["title"][0])
+
+
 def build_client(zones):
     spells = []
     for zone in zones:
         for template, fields in spells_for(zone):
+            spells.append({"template": template, "fields": fields})
+    for r in REGIONS:
+        for template, fields in region_spells(r):
             spells.append({"template": template, "fields": fields})
     return {"comment": "Generated by mod-azeroth-completion/tools/zone_rewards/build.py. "
                        "make_client_patch.py adds these rows to the client's Spell.dbc.",
@@ -318,6 +461,10 @@ def build_titles(zones):
     for zone in zones:
         title = zone.z["title"].replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'PVP_MEDAL{zone.title_id} = "{title}"  -- {zone.name}')
+    for r in REGIONS:
+        if r["title"]:
+            title = r["title"][1].replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'PVP_MEDAL{r["title"][0]} = "{title}"  -- region: {r["name"]}')
     return "\n".join(lines) + "\n"
 
 
@@ -357,21 +504,25 @@ def main():
 
     zones = [Zone(i, z) for i, z in enumerate(ZONES)]
     check(zones)
+    check_regions(zones)
 
     os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
     with open(SQL_OUT, "w", newline="\n") as f:
         f.write(build_sql(zones))
+    with open(REGION_SQL_OUT, "w", newline="\n") as f:
+        f.write(build_region_sql())
     with open(JSON_OUT, "w", newline="\n") as f:
         json.dump(build_client(zones), f, indent=1, ensure_ascii=False)
         f.write("\n")
     print(f"Wrote {SQL_OUT}")
+    print(f"Wrote {REGION_SQL_OUT}")
     print(f"Wrote {JSON_OUT}")
     if args.addon:
         path = os.path.join(args.addon, "ZoneTitles.lua")
         with open(path, "w", newline="\n") as f:
             f.write(build_titles(zones))
         print(f"Wrote {path}")
-    print(f"{len(zones)} zones")
+    print(f"{len(zones)} zones, {len(REGIONS)} regions")
 
 
 if __name__ == "__main__":
