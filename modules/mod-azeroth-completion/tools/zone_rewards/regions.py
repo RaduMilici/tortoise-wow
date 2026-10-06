@@ -10,7 +10,7 @@
 #
 # mount = (name, mount creature entry, spell icon id, look item entry, flavour)
 #         The creature gives the mount its model; the look item its inventory icon.
-# title = (title id, name). Ids 120-127 (zone titles use 70-119; the core caps titles at 127).
+# title = (title id, name). Ids 120-122 (zone titles use 70-119, lore titles 123-127; the core caps titles at 127).
 
 
 def R(id, name, description, scope, zones=(), map_id=0, icon="", money=0, mount=None, title=None):

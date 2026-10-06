@@ -5,6 +5,7 @@
 #include "Database/DBCStores.h"
 #include "Database/SQLStorages.h"
 #include "GameObject.h"
+#include "NPCHandler.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectMgr.h"
@@ -14,6 +15,9 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <cmath>
+#include <limits>
+#include <tuple>
 #include <numeric>
 #include <queue>
 #include <regex>
@@ -193,6 +197,7 @@ namespace Azc
             void BuildTravel();
             void BuildCreatures();
             void BuildStorylines();
+            void BuildLore();
             void FillNpcRef(NpcRef& ref, StarterKind kind, uint32 entry, uint32 preferZone);
             void Finish();
             void BuildRegions();
@@ -1230,6 +1235,122 @@ namespace Azc
             Log(line.str());
         }
 
+        void Generator::BuildLore()
+        {
+            // Towns and camps: every permanent spawn of a creature that offers a service.
+            // A lore object far from all of them is a secret.
+            std::map<std::tuple<uint32, int32, int32>, std::vector<Point>> service;     // (map, cell x, cell y), 100-yard cells
+            float const cellSize = 100.0f;
+            auto cellOf = [&](float v) { return int32(std::floor(v / cellSize)); };
+            for (auto const& pair : m_creatureSpawns)
+            {
+                CreatureInfo const* info = sObjectMgr.GetCreatureTemplate(pair.first);
+                if (!info || !info->npc_flags)
+                    continue;
+                for (Spawn const& s : pair.second)
+                    if (!s.event)
+                        service[{ s.pos.map, cellOf(s.pos.x), cellOf(s.pos.y) }].push_back(s.pos);
+            }
+            auto nearestService = [&](Point const& p)
+            {
+                float best = std::numeric_limits<float>::max();
+                int32 reach = int32(std::ceil(m_cfg.secretDistance / cellSize));
+                for (int32 dx = -reach; dx <= reach; ++dx)
+                    for (int32 dy = -reach; dy <= reach; ++dy)
+                    {
+                        auto itr = service.find({ p.map, cellOf(p.x) + dx, cellOf(p.y) + dy });
+                        if (itr == service.end())
+                            continue;
+                        for (Point const& n : itr->second)
+                        {
+                            float ddx = n.x - p.x, ddy = n.y - p.y, ddz = n.z - p.z;
+                            best = std::min(best, std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz));
+                        }
+                    }
+                return best;
+            };
+
+            uint32 loreCount = 0, secretCount = 0;
+            std::map<std::string, uint32> excluded;
+            for (auto const& pair : m_goSpawns)
+            {
+                GameObjectInfo const* info = sObjectMgr.GetGameObjectInfo(pair.first);
+                if (!info || info->type != GAMEOBJECT_TYPE_TEXT || !info->text.pageID)
+                    continue;
+                PageText const* page = sPageTextStore.LookupEntry<PageText>(info->text.pageID);
+                std::string const& name = info->name;
+                Override const* o = FindOverride(CAT_LORE, info->id);
+
+                // Copies of the object, zone by zone.
+                std::map<uint32, std::vector<Spawn const*>> byZone;
+                for (Spawn const& s : pair.second)
+                    if (!s.event && s.zoneId)
+                        byZone[s.zoneId].push_back(&s);
+
+                std::string reason;
+                if (IsTechnicalName(name))
+                    reason = "technical_name";
+                else if (!page || !page->text || !*page->text)
+                    reason = "no_text";
+                else if (info->PhaseQuestId)
+                    reason = "phased";
+                else if (byZone.empty())
+                    reason = pair.second.empty() ? "not_spawned" : "event_only";
+                if (o && o->mode == OVERRIDE_EXCLUDE)
+                    reason = "override_exclude";
+                if (!reason.empty())
+                {
+                    ++excluded[reason];
+                    for (auto const& z : byZone)
+                        Exclude(z.first, CAT_LORE, info->id, name, reason);
+                    continue;
+                }
+
+                for (auto const& z : byZone)
+                {
+                    if (!IsEligibleZone(z.first))
+                    {
+                        ++excluded["no_zone"];
+                        continue;
+                    }
+                    LoreObjective obj;
+                    obj.entry = info->id;
+                    obj.name = name;
+                    obj.summary = FirstSentence(page->text);
+                    obj.scale = info->size > 1.0f ? info->size : 1.0f;
+                    obj.key = UINT32_MAX;
+                    float distance = std::numeric_limits<float>::max();
+                    for (Spawn const* s : z.second)
+                    {
+                        obj.key = std::min(obj.key, s->guid);
+                        obj.spawns.push_back(s->pos);
+                        distance = std::min(distance, nearestService(s->pos));
+                    }
+                    obj.areaId = z.second.front()->areaId;
+                    obj.secret = distance > m_cfg.secretDistance;
+                    // Lore is extra by default; secrets always are.
+                    obj.bonus = !m_cfg.loreMandatory || obj.secret;
+                    obj.bonusReason = obj.secret ? "secret" : obj.bonus ? "lore" : "";
+                    if (o)
+                    {
+                        obj.hint = o->hint;
+                        if (o->mode == OVERRIDE_MANDATORY)
+                            obj.bonus = false, obj.bonusReason.clear();
+                        else if (o->mode == OVERRIDE_BONUS)
+                            obj.bonus = true, obj.bonusReason = "override_bonus";
+                    }
+                    ++(obj.secret ? secretCount : loreCount);
+                    Zone(z.first).lore.push_back(std::move(obj));
+                }
+            }
+
+            std::ostringstream line;
+            line << "Lore: " << loreCount << " books and plaques, " << secretCount << " secrets";
+            for (auto const& e : excluded)
+                line << ", " << e.second << " " << e.first;
+            Log(line.str());
+        }
+
         void Generator::Finish()
         {
             uint32 dropped = 0;
@@ -1245,6 +1366,7 @@ namespace Azc
                     for (auto const& r : zone.rares) n += !r.bonus;
                     for (auto const& e : zone.elites) n += !e.bonus;
                     for (auto const& t : zone.travel) n += !t.bonus;
+                    for (auto const& l : zone.lore) n += !l.bonus;
                     return n;
                 };
                 if (mandatoryCount() == 0)
@@ -1286,6 +1408,7 @@ namespace Azc
                 std::sort(zone.rares.begin(), zone.rares.end(), byLevel);
                 std::sort(zone.elites.begin(), zone.elites.end(), byLevel);
                 std::sort(zone.travel.begin(), zone.travel.end(), [](auto const& a, auto const& b) { return a.name < b.name; });
+                std::sort(zone.lore.begin(), zone.lore.end(), [](auto const& a, auto const& b) { return a.name != b.name ? a.name < b.name : a.key < b.key; });
 
                 for (uint32 i = 0; i < zone.exploration.size(); ++i)
                     m_defs->explorationByArea[zone.exploration[i].areaId] = { zone.zoneId, i };
@@ -1295,6 +1418,13 @@ namespace Azc
                     m_defs->eliteByEntry[zone.elites[i].entry] = { zone.zoneId, i };
                 for (uint32 i = 0; i < zone.travel.size(); ++i)
                     m_defs->travelByNode[zone.travel[i].nodeId] = { zone.zoneId, i };
+                for (uint32 i = 0; i < zone.lore.size(); ++i)
+                {
+                    m_defs->loreByKey[zone.lore[i].key] = { zone.zoneId, i };
+                    ++m_defs->loreTotals[LORE_KIND_ANY];
+                    if (zone.lore[i].secret)
+                        ++m_defs->loreTotals[LORE_KIND_SECRET];
+                }
 
                 if (m_cfg.logGeneratorDetail)
                 {
@@ -1303,7 +1433,8 @@ namespace Azc
                         ++excl[std::string(CategoryKey(e.cat)) + ":" + e.reason];
                     std::ostringstream line;
                     line << zone.name << ": " << zone.exploration.size() << " exploration, " << zone.storylines.size() << " storylines, "
-                         << zone.rares.size() << " rares, " << zone.elites.size() << " elites, " << zone.travel.size() << " travel";
+                         << zone.rares.size() << " rares, " << zone.elites.size() << " elites, " << zone.travel.size() << " travel, "
+                         << zone.lore.size() << " lore";
                     for (auto const& e : excl)
                         line << "; excluded " << e.second << " " << e.first;
                     Log(line.str());
@@ -1423,6 +1554,10 @@ namespace Azc
                 for (auto const& r : zone.rares) h = Fnv(h, "r" + std::to_string(r.entry) + (r.bonus ? "b" : ""));
                 for (auto const& e : zone.elites) h = Fnv(h, "l" + std::to_string(e.entry) + (e.bonus ? "b" : ""));
                 for (auto const& t : zone.travel) h = Fnv(h, "t" + std::to_string(t.nodeId) + (t.bonus ? "b" : ""));
+                // Lore that never counts leaves the hash alone, so adding lore does not bump every zone.
+                for (auto const& l : zone.lore)
+                    if (!l.bonus)
+                        h = Fnv(h, "o" + std::to_string(l.key));
                 zone.contentHash = h;
             }
 
@@ -1448,7 +1583,7 @@ namespace Azc
                 }
                 zone.version = itr == stored.end() ? 1 : itr->second.first + 1;
                 ++changed;
-                uint32 objectives = uint32(zone.exploration.size() + zone.storylines.size() + zone.rares.size() + zone.elites.size() + zone.travel.size());
+                uint32 objectives = uint32(zone.exploration.size() + zone.storylines.size() + zone.rares.size() + zone.elites.size() + zone.travel.size() + zone.lore.size());
                 CharacterDatabase.PExecute("REPLACE INTO `azcomp_zone_definition` (`zone_id`, `version`, `content_hash`, `objective_count`, `generated_at`) "
                     "VALUES (%u, %u, " UI64FMTD ", %u, " UI64FMTD ")", zone.zoneId, zone.version, zone.contentHash, objectives, uint64(m_defs->generatedAt));
             }
@@ -1477,6 +1612,7 @@ namespace Azc
             BuildTravel();
             BuildCreatures();
             BuildStorylines();
+            BuildLore();
             Finish();
             BuildRegions();
             AssignVersions();

@@ -55,6 +55,7 @@ storyline:<rootQuestId>       storyline:65
 rare:<creatureEntry>          rare:520
 elite:<creatureEntry>         elite:448
 travel:<taxiNodeId>           travel:4
+lore:<lowestSpawnGuid>        lore:20808
 ```
 
 ### Hidden information
@@ -62,6 +63,8 @@ travel:<taxiNodeId>           travel:4
 `hid=1` on an unkilled rare or elite means "this is a secret": the addon decides whether to draw
 `□ ???` or `□ Brack`. When the server runs with `AzerothCompletion.HiddenInfo = 0` it already
 replaces the name with `???` and leaves out coordinates and loot; with `2` nothing is hidden.
+Unfound secrets (lore far from any town) follow the same rule: `hid=1`, and only their area
+(`a`/`an`) unless stripped.
 
 ## Requests
 
@@ -69,19 +72,20 @@ replaces the name with `???` and leaves out coordinates and loot; with `2` nothi
 |---|---|---|
 | `HELLO` | `<clientProtocol>` | `PROTO`. Also switches events on for this session. Send it once after login. |
 | `GET_PROTOCOL_VERSION` | | `PROTO` |
-| `GET_ZONE_STATE` | `[zoneId] [full]` | `ZONE`, 5× `CAT`, `OBJ` for every objective (omit with `full=0`), `MS` per milestone |
+| `GET_ZONE_STATE` | `[zoneId] [full]` | `ZONE`, 6× `CAT`, `OBJ` for every objective (omit with `full=0`), `MS` per milestone |
 | `GET_CATEGORY` | `<zoneId> <category>` | `ZONE`, `CAT`, `OBJ`… |
-| `GET_OBJECTIVE_DETAIL` | `<objectiveId>` | `ZONE`, `CAT`, `OBJ`, `DONE`, plus per category: storyline → `STORY`, `EXG`, `QUEST`, `QOBJ`; rare/elite → `CRE`, `SPAWN`, `AREA`, `QREF`, `LOOT`; exploration → `AREA` |
+| `GET_OBJECTIVE_DETAIL` | `<objectiveId>` | `ZONE`, `CAT`, `OBJ`, `DONE`, plus per category: storyline → `STORY`, `EXG`, `QUEST`, `QOBJ`; rare/elite → `CRE`, `SPAWN`, `AREA`, `QREF`, `LOOT`; exploration → `AREA`; lore → `SPAWN` per copy (not for an unfound secret) |
 | `GET_MISSING` | `[zoneId]` | `ZONE`, then per visible category `CAT` + `MISS`… (+ `BLOCK` under storylines) |
 | `GET_STORYLINE` | `<id or storyline:id>` | `STORY`, `EXG`…, `QUEST`…, `QOBJ`… |
 | `GET_CURRENT_PROGRESS` | `[all]` | `CUR`, `ZSUM` per zone (zones with progress only, unless `all=1`) |
 | `GET_SUGGESTIONS` | `[zoneId]` | `ZONE`, `SUG`… |
-| `GET_HISTORY` | `[limit]` (default 20, max 100) | `HIST`… newest first, `ZDONE`…, `RDONE`… |
+| `GET_HISTORY` | `[limit]` (default 20, max 100) | `HIST`… newest first, `ZDONE`…, `RDONE`…, `LDONE`… |
 | `GET_REGIONS` | | per region in display order: `REGION`, then `RZ` per zone |
+| `GET_LORE` | | `LORE`, `LMS` per reward count, `LZ` per zone with lore |
 | `SEARCH` | `<text>` (2+ letters, may contain spaces) | `HIT`… (max 40, then `MORE`), or `NOHIT` |
 
 `zoneId` 0 or omitted = the zone the character is in. `category` is `exploration`, `storylines`,
-`rares`, `elites` or `travel`.
+`rares`, `elites`, `travel` or `lore`.
 
 Errors come back as `ERR^code=...^msg=...`. Codes: `NOT_READY`, `NOT_TRACKED`, `RATE_LIMITED`, `QUERY_TOO_SHORT`,
 `UNKNOWN_REQUEST`, `UNKNOWN_ZONE`, `UNKNOWN_CATEGORY`, `BAD_OBJECTIVE_ID`, `UNKNOWN_OBJECTIVE`,
@@ -93,7 +97,7 @@ Errors come back as `ERR^code=...^msg=...`. Codes: `NOT_READY`, `NOT_TRACKED`, `
 ### PROTO
 `v` protocol version, `min` oldest supported client protocol, `srv` module version, `chunk` chunk
 size, `hid` hidden-info mode (0/1/2), `w` category weights (exploration, storylines, rares, elites,
-travel), `ms` milestone percents, `gen` definition generation.
+travel, lore), `ms` milestone percents, `gen` definition generation.
 
 ### ZONE
 `id`, `n`, `map`, `lmin`/`lmax` level range, `pct` completion (0-100, never 100 unless every
@@ -105,7 +109,7 @@ completion is never revoked; `pct` may drop below 100 when later versions add co
 ### CAT
 `c` key, `t` title, `d` done, `tot` total, `pct`, `w` effective weight in percent (weights of
 hidden categories are redistributed), `vis` (0 = nothing to do here, hide it), `bd`/`bt` bonus
-done/total.
+done/total. Lore is usually bonus only (`vis=0`, `bt>0`): show it with its bonus counts.
 
 ### OBJ / MISS
 Common: `id`, `c`, `n`, `d`, `z`, `at`, `b`, `hid`, `br` (why it is bonus).
@@ -119,6 +123,9 @@ Common: `id`, `c`, `n`, `d`, `z`, `at`, `b`, `hid`, `br` (why it is bonus).
   (`rare`, `rare_elite`, `elite`, `boss`), `imp` encounter importance, `m`/`x`/`y`/`a`/`an` first
   spawn and its area, `h` hint
 - travel: `node`, `f`, `m`/`x`/`y`, `a`/`an`
+- lore: `sc` copies in the zone, `sec` secret, `br` (`lore`, `secret`, `override_bonus`); unless
+  hidden: `e` gameobject entry, `m`/`x`/`y`/`a`/`an` first copy, `h` hint; once found: `txt` the
+  first sentence of its text
 
 ### STORY
 `id`, `oid` objective id, `n` title, `sum` summary, `z`, `f`, `lmin`/`lmax`, `qd`/`qt`, `d`,
@@ -178,19 +185,20 @@ one describes what the claim granted, and claims recorded before rewards were ke
 `map`, `earned`.
 
 ### SUG
-Suggestion: `k` (`explore`, `quest`, `rare`, `elite`, `travel`), `id`, `t` display text, `q` quest,
+Suggestion: `k` (`explore`, `quest`, `rare`, `elite`, `travel`, `lore`), `id`, `t` display text, `q` quest,
 `m`/`x`/`y`, `dist` yards. Only content the character can do now; rares and elites only when the
-server reveals hidden information.
+server reveals hidden information. Lore only when close by (half the suggestion range), and
+never a secret.
 
 ### HIT
-Search result: `k` (`zone`, `exploration`, `storyline`, `quest`, `rare`, `elite`, `travel`), `id`
+Search result: `k` (`zone`, `exploration`, `storyline`, `quest`, `rare`, `elite`, `travel`, `lore`), `id`
 (objective id; `zone:<id>` for zones; for quests the id of their storyline), `n`, `z`, `zn`, and
 `q` quest id for quests. Only content for the character's faction; unkilled rares and elites are
-never returned unless the server reveals hidden information.
+never returned unless the server reveals hidden information, and neither are unfound secrets.
 
-### HIST / ZDONE / RDONE
+### HIST / ZDONE / RDONE / LDONE
 `HIST`: `id`, `c`, `n`, `z`, `zn`, `at`, `src`. `ZDONE`: `z`, `zn`, `at`, `ver`. `RDONE`: region
-`r`, `rn`, `at`.
+`r`, `rn`, `at`. `LDONE`: lore count reached, `k` (`lore`, `secret`), `cnt`, `at`.
 
 ### REGION / RZ
 A region is a group of zones with a reward for completing all of them.
@@ -201,13 +209,23 @@ it would grant).
 `RZ`: `r` region, `z`, `zn`, `pct`, `earned`, `app` (0 = nothing in this zone for the character,
 so it does not count), `lmin`/`lmax`.
 
+### LORE / LMS / LZ
+Lore objects (books, plaques, monuments) are found by walking up to them; secrets are the ones far
+from any town. They count towards lore rewards, and towards zones only when the server says so.
+`LORE`: `f`/`tot` lore found / in the world, `sf`/`st` secrets found / in the world, `mand` lore
+counts towards zones.
+`LMS`: a reward for a count found, `k` (`lore` every lore object, `secret` secrets only), `cnt`,
+`got` reached, `at` when, and the reward as in `MS` (`rw`, `rx`, `it`). Each pays once, even
+across an admin reset.
+`LZ`: a zone with lore, `z`, `zn`, `map`, `f`/`tot` found / total, `sf`/`st` secrets.
+
 ## Events
 
 After `HELLO`, the server pushes `EV` records (frame `E<n>`):
 
 | `t` | Fields |
 |---|---|
-| `OBJECTIVE_COMPLETED` | `c` (`EXPLORATION`, `STORYLINE`, `RARE`, `ELITE`, `TRAVEL`), `id`, `n`, `cd`/`ct` category progress, `b` |
+| `OBJECTIVE_COMPLETED` | `c` (`EXPLORATION`, `STORYLINE`, `RARE`, `ELITE`, `TRAVEL`, `LORE`), `id`, `n`, `cd`/`ct` category progress, `b`; lore adds `sec` secret, `lf`/`lt` found / total of its kind, `txt` first sentence |
 | `CATEGORY_COMPLETED` | `c`, `cd`, `ct` |
 | `MILESTONE_REACHED` | `m` percent, `rw` rewards granted, `it` items granted (`id:count,...`) |
 | `ZONE_COMPLETED` | `ver` |
@@ -216,6 +234,7 @@ After `HELLO`, the server pushes `EV` records (frame `E<n>`):
 | `DEFINITION_UPDATED` | `gen`, `zones` = `zoneId:version,...` changed; re-request what is on screen |
 | `RETROACTIVE` | `count` objectives recognised from existing character data at login |
 | `REGION_COMPLETED` | `r`, `rn` region name, `zc` zones, `rw`/`rx`/`it` rewards granted (no zone fields) |
+| `LORE_MILESTONE` | `k` (`lore`, `secret`), `cnt` count reached, `tot` total in the world, `rw`/`rx`/`it` rewards granted (no zone fields) |
 
 Every zone event also has `z`, `zn` and `zp` (zone percent after the change). Example:
 

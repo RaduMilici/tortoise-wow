@@ -193,6 +193,28 @@ namespace Azc
                     WriteLocation(w, "", t.position, t.areaId, defs);
                     break;
                 }
+                case CAT_LORE:
+                {
+                    // An unfound secret only gives away its area (and nothing at all when stripped).
+                    LoreObjective const& l = zone.lore[obj.index];
+                    w.Kv("sc", uint32(l.spawns.size()));
+                    if (l.secret)
+                        w.Kv("sec", true);
+                    if (!obj.hidden)
+                    {
+                        w.Kv("e", l.entry);
+                        if (!l.spawns.empty())
+                            WriteLocation(w, "", l.spawns.front(), l.areaId, defs);
+                        w.KvIf("h", l.hint);
+                    }
+                    else if (!strip && l.areaId)
+                        w.Kv("a", l.areaId).Kv("an", defs.AreaName(l.areaId));
+                    if (obj.done)
+                        w.KvIf("txt", l.summary);
+                    if (!l.bonusReason.empty())
+                        w.Kv("br", l.bonusReason);
+                    break;
+                }
                 default:
                     break;
             }
@@ -270,6 +292,7 @@ namespace Azc
                 case CAT_RARE:        map = &defs.rareByEntry; break;
                 case CAT_ELITE:       map = &defs.eliteByEntry; break;
                 case CAT_TRAVEL:      map = &defs.travelByNode; break;
+                case CAT_LORE:        map = &defs.loreByKey; break;
                 case CAT_STORYLINE:
                 {
                     Storyline const* s = defs.FindStoryline(key);
@@ -345,6 +368,18 @@ namespace Azc
                     for (auto const& l : c.loot)
                         if (ItemPrototype const* proto = sObjectMgr.GetItemPrototype(l.first))
                             w.Rec("LOOT").Kv("id", ObjectiveId(cat, key)).Kv("item", l.first).Kv("n", proto->Name1).Kv("q", proto->Quality).Kv("ch", Fmt(l.second));
+                    break;
+                }
+                case CAT_LORE:
+                {
+                    if (obj->hidden)
+                        break;
+                    LoreObjective const& l = zone->lore[obj->index];
+                    for (Point const& p : l.spawns)
+                    {
+                        w.Rec("SPAWN").Kv("id", ObjectiveId(cat, key));
+                        WriteLocation(w, "", p, 0, defs);
+                    }
                     break;
                 }
                 case CAT_EXPLORATION:
@@ -594,6 +629,10 @@ namespace Azc
                     for (TravelObjective const& t : zone.travel)
                         if (t.teamMask & team)
                             hit("travel", ObjectiveId(CAT_TRAVEL, t.nodeId), t.name, zone.zoneId);
+                    // secrets stay secret until found
+                    for (LoreObjective const& l : zone.lore)
+                        if (!l.secret || cfg.hiddenInfo == 2 || state.Find(CAT_LORE, l.key))
+                            hit("lore", ObjectiveId(CAT_LORE, l.key), l.name, zone.zoneId);
                 }
                 if (hits >= 40)
                     w.Rec("MORE");
@@ -626,6 +665,46 @@ namespace Azc
                 return;
             }
 
+            if (cmd == "GET_LORE")
+            {
+                std::array<uint32, LORE_KIND_COUNT> found = LoreFound(state, defs);
+                w.Rec("LORE").Kv("f", found[LORE_KIND_ANY]).Kv("tot", defs.loreTotals[LORE_KIND_ANY])
+                    .Kv("sf", found[LORE_KIND_SECRET]).Kv("st", defs.loreTotals[LORE_KIND_SECRET]).Kv("mand", cfg.loreMandatory);
+                for (uint8 k = 0; k < LORE_KIND_COUNT; ++k)
+                {
+                    for (uint32 count : LoreRewardCounts(LoreKind(k)))
+                    {
+                        // A reached count shows what it granted, an open one what it would grant.
+                        auto claim = state.loreClaims.find({ k, count });
+                        bool got = claim != state.loreClaims.end();
+                        RewardSummary reward = got ? claim->second.reward : DescribeLoreRewards(player, LoreKind(k), count);
+                        w.Rec("LMS").Kv("k", k == LORE_KIND_SECRET ? "secret" : "lore").Kv("cnt", count).Kv("got", got)
+                            .KvIf("rw", reward.text).KvIf("rx", reward.extra).KvIf("it", reward.items);
+                        if (got)
+                            w.Kv("at", uint64(claim->second.at));
+                    }
+                }
+                // Zones with lore: found / total, so the addon can list where to look.
+                for (auto const& pair : defs.zones)
+                {
+                    ZoneDef const& zone = pair.second;
+                    if (zone.lore.empty())
+                        continue;
+                    uint32 zf = 0, zs = 0, zsf = 0;
+                    for (LoreObjective const& l : zone.lore)
+                    {
+                        bool got = state.Find(CAT_LORE, l.key) != nullptr;
+                        zf += got ? 1 : 0;
+                        zs += l.secret ? 1 : 0;
+                        zsf += l.secret && got ? 1 : 0;
+                    }
+                    w.Rec("LZ").Kv("z", zone.zoneId).Kv("zn", zone.name).Kv("map", zone.mapId).Kv("f", zf).Kv("tot", uint32(zone.lore.size()))
+                        .Kv("sf", zsf).Kv("st", zs);
+                }
+                SendResponse(player, reqId, w);
+                return;
+            }
+
             if (cmd == "GET_HISTORY")
             {
                 uint32 limit = std::min<uint32>(100, std::max<uint32>(1, uint32(std::strtoul(arg(0).empty() ? "20" : arg(0).c_str(), nullptr, 10))));
@@ -646,6 +725,7 @@ namespace Azc
                             case CAT_RARE:        name = zone->rares[defs.rareByEntry.at(key).index].name; break;
                             case CAT_ELITE:       name = zone->elites[defs.eliteByEntry.at(key).index].name; break;
                             case CAT_TRAVEL:      name = zone->travel[defs.travelByNode.at(key).index].name; break;
+                            case CAT_LORE:        name = zone->lore[defs.loreByKey.at(key).index].name; break;
                             case CAT_STORYLINE:   name = defs.FindStoryline(key)->title; break;
                             default: break;
                         }
@@ -659,6 +739,8 @@ namespace Azc
                 for (auto const& r : state.regionsEarned)
                     if (RegionDef const* region = defs.FindRegion(r.first))
                         w.Rec("RDONE").Kv("r", r.first).Kv("rn", region->name).Kv("at", uint64(r.second.at));
+                for (auto const& l : state.loreClaims)
+                    w.Rec("LDONE").Kv("k", l.first.first == LORE_KIND_SECRET ? "secret" : "lore").Kv("cnt", l.first.second).Kv("at", uint64(l.second.at));
                 SendResponse(player, reqId, w);
                 return;
             }
@@ -815,6 +897,18 @@ namespace Azc
                 continue;
             TravelObjective const& t = zone.travel[obj.index];
             add("travel", ObjectiveId(CAT_TRAVEL, obj.key), "Flight path: " + t.name, true, t.position);
+        }
+        // Lore is extra: only suggested when it is close by, and secrets never.
+        for (ObjectiveEval const& obj : ev.cats[CAT_LORE].objectives)
+        {
+            LoreObjective const& l = zone.lore[obj.index];
+            if (obj.done || obj.hidden || l.secret || l.spawns.empty())
+                continue;
+            float d = distanceTo(l.spawns.front());
+            if (d < 0.0f || d > cfg.suggestionRange / 2)
+                continue;
+            std::string where = l.areaId ? " (" + defs.AreaName(l.areaId) + ")" : "";
+            add("lore", ObjectiveId(CAT_LORE, obj.key), "Read: " + l.name + where, true, l.spawns.front());
         }
 
         // Nearest first; things without a known spot after everything in range.

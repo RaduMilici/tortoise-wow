@@ -26,8 +26,9 @@ character can do next. The addon is meant to be a presentation layer.
 | Rare Hunts | rare / rare-elite creatures spawned in the zone | normal kill credit (group members in range count; no killing blow needed) |
 | Elite Encounters | named open-world elites, scored (see below) | normal kill credit |
 | Travel | taxi nodes of the zone usable by the character's faction | knowing the flight path (existing ones count retroactively) |
+| Lore & Secrets | readable objects (books, plaques, monuments) spawned in the zone | walking up to one (`Lore.Range`, 6 yards from its centre, times its size for big objects) |
 
-Default weights 30 / 30 / 15 / 15 / 10. A category with nothing to do (for this character) is
+Default weights 30 / 30 / 15 / 15 / 10 (and 10 for lore, which only counts with `Lore.Mandatory = 1`). A category with nothing to do (for this character) is
 hidden and its weight is shared out among the others. The zone shows 100% only when every
 required objective is done; until then it is capped at 99%.
 
@@ -66,6 +67,16 @@ Hunts.
 
 **Travel** — nodes that are part of the flight network, with a flight master for at least one
 faction. Enemy-only nodes simply do not apply to that character.
+
+**Lore & Secrets** — readable objects (`GAMEOBJECT_TYPE_TEXT` with page text) with a permanent
+spawn. Every copy of the same object in one zone is one objective (`lore:<lowest spawn guid>`);
+the copies in another zone are another one. An object farther than `Lore.SecretDistance` (100
+yards) from every NPC offering a service is a **secret**: hidden (`???`, area only) until found,
+never suggested or searchable before that. Lore is bonus by default (`Lore.Mandatory = 0`) and
+secrets always are, so a zone never waits on them. Dropped: technical names, objects without
+text, phased or event-only objects. Lore overrides use the object's **entry** (`category =
+'lore'`), so one row covers every copy. Players find lore by walking up to it rather than by
+reading it, because the client opens books by itself without telling the server.
 
 ### Overrides
 
@@ -144,7 +155,7 @@ The generator writes `data/sql/world/20261005120000_azeroth_completion_zone_rewa
 (items, spells, pets and the reward rows), `data/client/zone_reward_spells.json` (the same spells
 for the client; `make_client_patch.py` adds them to `Spell.dbc` in `patch-Z.mpq`) and, with
 `--addon <dir>`, the addon's `ZoneTitles.lua` (title names; the client has none for new ids).
-Re-run it after editing `zones.py` and ship all three together:
+Re-run it after editing `zones.py`, `regions.py` or `lore.py` and ship all three together:
 
 ```sh
 python3 modules/mod-azeroth-completion/tools/zone_rewards/build.py \
@@ -175,6 +186,28 @@ The default regions come from `tools/zone_rewards/regions.py` (generated into
 `data/sql/world/20261006120000_azeroth_completion_regions.sql`): eight areas of the world with a
 mount each, the two continents with a title, and Azeroth itself with a title and an epic mount.
 
+## Lore & Secrets
+
+Found lore is recorded like any objective (`azcomp_character_objective`, category 5, source
+`lore`). The lore rewards pay for how many a character has found, in total and secrets only
+(`azcomp_lore_reward`, world DB; same reward types as milestones, `MONEY_PER_LEVEL` uses the
+character's level, a `HOOK` gets zone 0 and the count). Each count pays once
+(`azcomp_character_lore`); the claims survive `.ac reset`, because found lore cannot be rebuilt
+from character data and would otherwise pay twice.
+
+The default tiers come from `tools/zone_rewards/lore.py` (generated into
+`data/sql/world/20261007120000_azeroth_completion_lore.sql`, which also excludes a few server
+notices):
+
+| Found | Reward |
+|---|---|
+| 10 lore | 10g, Inkwing Raven companion |
+| 25 lore | title "Lorekeeper" |
+| 50 lore | 25g, Tabard of the Chronicler |
+| 100 lore | 50g, title "Keeper of Histories" |
+| 3 secrets | title "Seeker of Secrets" |
+| 10 secrets | 25g, Curious Mana Wyrm companion |
+
 ## Commands
 
 | Command | Who | |
@@ -184,10 +217,11 @@ mount each, the two continents with a title, and Azeroth itself with a title and
 | `.ac progress` | player | most complete zones |
 | `.ac suggest` | player | nearby things to do now |
 | `.ac regions` | player | progress in every region, with the zones left |
+| `.ac lore [zone]` | player | lore and secrets found, the lore rewards, and what is left to read in the zone |
 | `.ac status` | moderator | generator totals and log |
 | `.ac inspect <zone>` | moderator | the zone's generated checklist and every exclusion with its reason |
 | `.ac inspect-story <id>` | moderator | storyline graph (any of its quest ids works), with the selected player's state |
-| `.ac inspect-objective <id>` | moderator | one objective (`rare:520`, `exploration:area_920`, ...) or why it was excluded |
+| `.ac inspect-objective <id>` | moderator | one objective (`rare:520`, `exploration:area_920`, `lore:20808`, ...) or why it was excluded |
 | `.ac regenerate` | admin | rebuild from world data; online players refresh on their next update |
 | `.ac reload` | admin | reload config and rewards |
 | `.ac reset <character> <zone\|all>` | admin | forget progress; explored areas, quests and flight paths count again without rewards |

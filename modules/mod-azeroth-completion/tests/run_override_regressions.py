@@ -20,6 +20,7 @@ code = r'''
 #include <sstream>
 struct Player {
     uint32 GetMapId() const { return 0; }
+    bool IsAlive() const { return true; }
     struct Taxi { bool IsTaximaskNodeKnown(uint32) const { return false; } } taxi;
     Taxi const& GetTaxi() const { return taxi; }
 };
@@ -70,6 +71,7 @@ code += between('AzcGenerator.cpp', '        void Generator::BuildTravel()', '  
 code += between('AzcGenerator.cpp', '        void Generator::Finish()', '        void Generator::BuildRegions()')
 code += between('AzcProgress.cpp', '    ZoneEval EvaluateZone(', '    RegionEval EvaluateRegion(')
 code += between('AzcProgress.cpp', '    RegionEval EvaluateRegion(', '    void WithState(')
+code += between('AzcProgress.cpp', '    bool IsNearLore(', '    QuestEval EvaluateQuest(')
 code += between('AzcGenerator.cpp', '        uint64 Fnv(', '        std::string Lower(')
 code += 'void Hash(std::shared_ptr<Definitions> m_defs) {\n'
 code += between('AzcGenerator.cpp', '            // Content hash of everything', '            std::unordered_map<uint32, std::pair<uint32, uint64>> stored;')
@@ -141,6 +143,65 @@ int main() {
         st.regionsEarned[1]=RegionClaim{ 5, {} };
         re=EvaluateRegion(&player, st, defs, region, false, &cache);
         check(re.earned && !re.complete, "earned region stays earned while new zones are open");
+    }
+
+    // Lore: extra by default, secrets hidden until found, counts survive regeneration.
+    {
+        Definitions defs;
+        ZoneDef& zone = defs.zones[1]; zone.zoneId=1;
+        ExplorationObjective explored; explored.areaId=10; zone.exploration.push_back(explored);
+        LoreObjective book; book.key=100; book.name="Book";
+        LoreObjective secret; secret.key=101; secret.name="Grave"; secret.secret=true; secret.bonusReason="secret";
+        zone.lore={book, secret};
+        defs.loreByKey[100]={1, 0}; defs.loreByKey[101]={1, 1};
+        PlayerState st;
+        ZoneEval ev=EvaluateZone(&player, st, defs, zone, false);
+        check(ev.allDone && ev.percent==100, "unfound bonus lore does not hold a zone back");
+        check(!ev.cats[CAT_LORE].visible && ev.cats[CAT_LORE].bonusTotal==2, "bonus-only lore is listed as bonus");
+        check(!ev.cats[CAT_LORE].objectives[0].hidden && ev.cats[CAT_LORE].objectives[1].hidden, "only unfound secrets are hidden");
+        st.records[MakeObjectiveKey(CAT_LORE, 101)].zoneId=1;
+        ev=EvaluateZone(&player, st, defs, zone, false);
+        check(ev.cats[CAT_LORE].bonusDone==1 && !ev.cats[CAT_LORE].objectives[1].hidden, "a found secret is revealed");
+        auto found=LoreFound(st, defs);
+        check(found[LORE_KIND_ANY]==1 && found[LORE_KIND_SECRET]==1, "found lore is counted by kind");
+        st.records[MakeObjectiveKey(CAT_LORE, 999)].zoneId=1;       // dropped by a later generation
+        st.records[MakeObjectiveKey(CAT_RARE, 100)].zoneId=1;       // same key, other category
+        found=LoreFound(st, defs);
+        check(found[LORE_KIND_ANY]==2 && found[LORE_KIND_SECRET]==1, "lore found earlier still counts after it is dropped");
+        zone.lore[0].bonus=false;
+        ev=EvaluateZone(&player, st, defs, zone, false);
+        check(ev.cats[CAT_LORE].visible && !ev.allDone && ev.percent<100, "mandatory lore counts towards the zone");
+
+        Generator plain, required;
+        plain.Zone(1).lore={book};
+        required.Zone(1).lore={book}; required.Zone(1).lore[0].bonus=false;
+        Generator none; none.Zone(1);
+        Hash(plain.m_defs); Hash(required.m_defs); Hash(none.m_defs);
+        check(plain.Zone(1).contentHash==none.Zone(1).contentHash, "bonus lore leaves the definition hash alone");
+        check(required.Zone(1).contentHash!=none.Zone(1).contentHash, "mandatory lore changes the definition hash");
+        Generator onlyLore; onlyLore.Zone(1).lore={book};
+        onlyLore.Finish();
+        check(onlyLore.m_defs->zones.empty(), "a zone with only bonus lore gets no checklist");
+        Generator indexed; auto& iz=indexed.Zone(1);
+        ExplorationObjective e2; e2.areaId=11; iz.exploration.push_back(e2);
+        iz.lore={book, secret};
+        indexed.Finish();
+        check(indexed.m_defs->loreByKey.size()==2 && indexed.m_defs->loreTotals[LORE_KIND_ANY]==2 &&
+              indexed.m_defs->loreTotals[LORE_KIND_SECRET]==1, "lore is indexed and totalled");
+    }
+
+    // Finding lore: within range of any copy, on the same map, further for big objects.
+    {
+        LoreObjective l;
+        l.spawns = { Point{ 0, 100.0f, 100.0f, 10.0f }, Point{ 0, 500.0f, 500.0f, 0.0f } };
+        check(IsNearLore(l, 0, 104.0f, 103.0f, 10.0f, 6.0f), "within range of a lore object finds it");
+        check(!IsNearLore(l, 0, 105.0f, 104.0f, 10.0f, 6.0f), "just out of range does not");
+        check(!IsNearLore(l, 0, 100.0f, 100.0f, 20.0f, 6.0f), "a floor above or below does not");
+        check(IsNearLore(l, 0, 500.0f, 505.0f, 0.0f, 6.0f), "any copy in the zone will do");
+        check(!IsNearLore(l, 1, 100.0f, 100.0f, 10.0f, 6.0f), "the same spot on another map does not");
+        l.scale = 2.0f;
+        check(IsNearLore(l, 0, 110.0f, 100.0f, 10.0f, 6.0f), "a big monument is found from further away");
+        check(!IsNearLore(l, 0, 113.0f, 100.0f, 10.0f, 6.0f), "but not from anywhere");
     }
     return failures ? 1:0;
 }

@@ -20,7 +20,8 @@ namespace Azc
         SOURCE_KILL    = 3,
         SOURCE_QUEST   = 4,
         SOURCE_TAXI    = 5,
-        SOURCE_ADMIN   = 6
+        SOURCE_ADMIN   = 6,
+        SOURCE_LORE    = 7      // walked up to a lore object
     };
     char const* SourceName(uint8 source);
 
@@ -133,11 +134,13 @@ namespace Azc
         time_t earnedAt = 0;
     };
 
+    // A one-time claim: a completed region or a lore count reached.
     struct RegionClaim
     {
         time_t at = 0;
-        RewardSummary reward;               // what completing it granted (empty for old or unrewarded claims)
+        RewardSummary reward;               // what it granted (empty for old or unrewarded claims)
     };
+    using Claim = RegionClaim;
 
     struct Event
     {
@@ -155,6 +158,7 @@ namespace Azc
         std::map<uint32, std::pair<time_t, uint32>> zonesEarned;    // zone -> (at, version)
         std::map<std::pair<uint32, uint32>, RewardSummary> milestones;  // (zone, percent) -> what the claim granted
         std::map<uint32, RegionClaim> regionsEarned;
+        std::map<std::pair<uint8, uint32>, Claim> loreClaims;  // (LoreKind, count) -> claim; kept across resets
 
         // runtime only
         uint32 tickTimer = 0;
@@ -182,6 +186,13 @@ namespace Azc
     };
 
     uint8 PlayerTeamMask(Player const* player);
+
+    // Whether a character at (map, x, y, z) is close enough to any copy of a lore object to find
+    // it: within `range` yards of its centre, scaled up by the object's size.
+    bool IsNearLore(LoreObjective const& lore, uint32 map, float x, float y, float z, float range);
+
+    // Lore objectives found by the character, by kind (every lore object, secrets).
+    std::array<uint32, LORE_KIND_COUNT> LoreFound(PlayerState const& state, Definitions const& defs);
 
     // All of these lock the progress store internally; callers pass the live Player.
     void ProgressOnLogin(Player* player);

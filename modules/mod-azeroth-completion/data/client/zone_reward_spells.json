@@ -7439,6 +7439,46 @@
     "auraDescription": "Mounted.",
     "effectMiscValue1": 80160
    }
+  },
+  {
+   "template": 36500,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64250,
+    "name": "Inkwing Raven",
+    "description": "Summons and dismisses Inkwing Raven, a reward for finding 10 lore objects.",
+    "auraDescription": "",
+    "effectMiscValue1": 94050
+   }
+  },
+  {
+   "template": 36500,
+   "fields": {
+    "nameSubtext": "",
+    "category": 0,
+    "recoveryTime": 0,
+    "categoryRecoveryTime": 0,
+    "spellFamilyName": 0,
+    "spellFamilyFlags": 0,
+    "maxLevel": 0,
+    "baseLevel": 0,
+    "spellLevel": 0,
+    "activeIconId": 0,
+    "entry": 64255,
+    "name": "Curious Mana Wyrm",
+    "description": "Summons and dismisses Curious Mana Wyrm, a reward for finding 10 secrets.",
+    "auraDescription": "",
+    "effectMiscValue1": 94055
+   }
   }
  ]
 }

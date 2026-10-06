@@ -16,7 +16,8 @@ namespace Azc
         std::string items;
     };
 
-    // Loads azcomp_milestone_reward and azcomp_region_reward (world DB). Safe to call again for a reload.
+    // Loads azcomp_milestone_reward, azcomp_region_reward and azcomp_lore_reward (world DB).
+    // Safe to call again for a reload.
     void LoadRewards();
     uint32 RewardRowCount();
 
@@ -30,6 +31,12 @@ namespace Azc
     // The same for completing a region (azcomp_region_reward).
     RewardSummary GrantRegionRewards(Player* player, RegionDef const& region);
     RewardSummary DescribeRegionRewards(Player* player, RegionDef const& region);
+
+    // Lore count rewards (azcomp_lore_reward): the counts that have a reward, lowest first, and
+    // what reaching one grants. MONEY_PER_LEVEL uses the character's level.
+    std::vector<uint32> LoreRewardCounts(LoreKind kind);
+    RewardSummary GrantLoreRewards(Player* player, LoreKind kind, uint32 count);
+    RewardSummary DescribeLoreRewards(Player* player, LoreKind kind, uint32 count);
 }
 
 #endif

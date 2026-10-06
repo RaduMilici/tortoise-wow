@@ -2,8 +2,8 @@
 # mod-azeroth-completion module configuration
 #
 # Every eligible outdoor zone becomes a completion checklist generated from world data:
-# Exploration, Storylines, Rare Hunts, Elite Encounters and Travel (flight paths).
-# Player commands: .ac, .ac missing, .ac progress, .ac suggest
+# Exploration, Storylines, Rare Hunts, Elite Encounters, Travel (flight paths) and Lore & Secrets.
+# Player commands: .ac, .ac missing, .ac progress, .ac suggest, .ac regions, .ac lore
 # Admin commands:  .ac status, .ac inspect <zone>, .ac regenerate, .ac reset <character> <zone>
 ###################################################################################################
 
@@ -23,13 +23,15 @@ AzerothCompletion.Maps = "0,1"
 #    AzerothCompletion.Weight.*
 #        Share of each category in the zone percentage. A category with nothing to do in a zone
 #        is hidden and its weight is shared out proportionally among the others.
-#        Default: 30 / 30 / 15 / 15 / 10
+#        Lore only has a weight when Lore.Mandatory = 1.
+#        Default: 30 / 30 / 15 / 15 / 10 / 10
 
 AzerothCompletion.Weight.Exploration = 30
 AzerothCompletion.Weight.Storylines = 30
 AzerothCompletion.Weight.Rares = 15
 AzerothCompletion.Weight.Elites = 15
 AzerothCompletion.Weight.Travel = 10
+AzerothCompletion.Weight.Lore = 10
 
 #    AzerothCompletion.SyncIntervalMs
 #        How often a character's explored areas, quests and flight paths are checked for news.
@@ -71,8 +73,31 @@ AzerothCompletion.Elites.MinScore = 4
 
 AzerothCompletion.Elites.WorldBossesMandatory = 0
 
+#    AzerothCompletion.Lore.Mandatory
+#        Lore objects (books, plaques, monuments) are found by walking up to them.
+#        0 = extra: they never count towards a zone, only towards the lore rewards
+#        1 = required like any other objective (secrets stay extra either way)
+#        Changing it changes the zone definitions (zones get a new version).
+#        Default: 0
+
+AzerothCompletion.Lore.Mandatory = 0
+
+#    AzerothCompletion.Lore.Range
+#        How close (yards) a character has to come to a lore object to find it, measured to its
+#        centre and multiplied by its size for objects scaled up (big monuments). At least 2.
+#        Default: 6
+
+AzerothCompletion.Lore.Range = 6
+
+#    AzerothCompletion.Lore.SecretDistance
+#        A lore object farther than this (yards) from every NPC offering a service (vendor,
+#        trainer, quest giver, flight master, innkeeper...) is a secret: hidden until found.
+#        Default: 100
+
+AzerothCompletion.Lore.SecretDistance = 100
+
 #    AzerothCompletion.HiddenInfo
-#        Unkilled rares and elites:
+#        Unkilled rares and elites, and unfound secrets:
 #        0 = server hides them ("???", no coordinates)
 #        1 = server sends them with a hidden flag; the addon chooses what to show
 #        2 = always revealed (also lets suggestions point at them)

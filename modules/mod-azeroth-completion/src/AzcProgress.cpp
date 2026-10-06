@@ -141,6 +141,7 @@ namespace Azc
                 case CAT_RARE:        verb = "Rare slain: "; break;
                 case CAT_ELITE:       verb = "Elite defeated: "; break;
                 case CAT_TRAVEL:      verb = "Flight path: "; break;
+                case CAT_LORE:        verb = "Lore found: "; break;
                 default: break;
             }
             e.chat = ChatPrefix() + zone.name + ": " + verb + name + (bonus ? " (bonus)" : "") + " - " + CategoryTitle(cat) + " " +
@@ -155,6 +156,7 @@ namespace Azc
                 case CAT_EXPLORATION: return SOURCE_EXPLORE;
                 case CAT_STORYLINE:   return SOURCE_QUEST;
                 case CAT_TRAVEL:      return SOURCE_TAXI;
+                case CAT_LORE:        return SOURCE_LORE;
                 default:              return SOURCE_KILL;
             }
         }
@@ -371,6 +373,89 @@ namespace Azc
             }
         }
 
+        // Pays the lore count rewards the character has reached. Claims are kept across resets
+        // (lore cannot be rebuilt from character data), so each one pays at most once.
+        void SyncLore(Player* player, PlayerState& state, Definitions const& defs, bool allowRewards, std::vector<Event>& events)
+        {
+            Settings const& cfg = GetConfig();
+            std::array<uint32, LORE_KIND_COUNT> found = LoreFound(state, defs);
+            for (uint8 k = 0; k < LORE_KIND_COUNT; ++k)
+            {
+                LoreKind kind = LoreKind(k);
+                for (uint32 count : LoreRewardCounts(kind))
+                {
+                    if (found[k] < count || state.loreClaims.count({ k, count }))
+                        continue;
+                    time_t now = time(nullptr);
+                    state.loreClaims[{ k, count }] = Claim{ now, RewardSummary() };     // claimed before granting
+                    bool grant = allowRewards && cfg.rewardsEnabled;
+                    RewardSummary reward = grant ? GrantLoreRewards(player, kind, count) : RewardSummary();
+                    state.loreClaims[{ k, count }].reward = reward;
+                    CharacterDatabase.PExecute("INSERT IGNORE INTO `azcomp_character_lore` (`guid`, `kind`, `count`, `claimed_at`, `rewarded`, "
+                        "`reward_text`, `reward_extra`, `reward_items`) VALUES (%u, %u, %u, " UI64FMTD ", %u, %s, %s, %s)",
+                        state.guid, uint32(k), count, uint64(now), grant ? 1u : 0u,
+                        SqlText(reward.text).c_str(), SqlText(reward.extra).c_str(), SqlText(reward.items).c_str());
+
+                    char const* noun = kind == LORE_KIND_SECRET ? "secrets" : "lore objects";
+                    Event e;
+                    e.type = "LORE_MILESTONE";
+                    e.fields.push_back({ "k", kind == LORE_KIND_SECRET ? "secret" : "lore" });
+                    e.fields.push_back({ "cnt", std::to_string(count) });
+                    e.fields.push_back({ "tot", std::to_string(defs.loreTotals[k]) });
+                    if (!reward.text.empty())
+                        e.fields.push_back({ "rw", reward.text });
+                    if (!reward.extra.empty())
+                        e.fields.push_back({ "rx", reward.extra });
+                    if (!reward.items.empty())
+                        e.fields.push_back({ "it", reward.items });
+                    e.chat = ChatPrefix() + "|cffffd100" + std::to_string(count) + " " + noun + " found!|r" + (reward.text.empty() ? "" : " Reward: " + reward.text);
+                    events.push_back(e);
+                }
+            }
+        }
+
+        // Lore objects the character is standing next to. Every object is checked, not only those
+        // of the current zone: an object close to a border may belong to the neighbouring zone.
+        void FindLore(Player* player, PlayerState& state, Definitions const& defs, std::vector<Event>& events)
+        {
+            if (defs.loreByKey.empty() || !player->IsAlive() || player->IsTaxiFlying())
+                return;
+            Settings const& cfg = GetConfig();
+            uint32 map = player->GetMapId();
+            float px = player->GetPositionX(), py = player->GetPositionY(), pz = player->GetPositionZ();
+            bool any = false;
+            for (auto const& pair : defs.loreByKey)
+            {
+                if (state.Find(CAT_LORE, pair.first))
+                    continue;
+                ZoneDef const* zone = defs.FindZone(pair.second.zoneId);
+                if (!zone)
+                    continue;
+                LoreObjective const& lore = zone->lore[pair.second.index];
+                if (!IsNearLore(lore, map, px, py, pz, cfg.loreRange))
+                    continue;
+
+                Record(state, CAT_LORE, lore.key, zone->zoneId, zone->version, SOURCE_LORE);
+                any = true;
+                std::array<uint32, LORE_KIND_COUNT> found = LoreFound(state, defs);
+                LoreKind kind = lore.secret ? LORE_KIND_SECRET : LORE_KIND_ANY;
+                ZoneEval eval = EvaluateZone(player, state, defs, *zone, false);
+                Event e = MakeObjectiveEvent(*zone, eval, CAT_LORE, lore.key, lore.name, lore.bonus);
+                if (lore.secret)
+                    e.fields.push_back({ "sec", "1" });
+                e.fields.push_back({ "lf", std::to_string(found[kind]) });
+                e.fields.push_back({ "lt", std::to_string(defs.loreTotals[kind]) });
+                if (!lore.summary.empty())
+                    e.fields.push_back({ "txt", lore.summary });
+                e.chat = ChatPrefix() + zone->name + ": " + (lore.secret ? "Secret found: " : "Lore found: ") + lore.name + " (" +
+                    std::to_string(found[kind]) + " / " + std::to_string(defs.loreTotals[kind]) + (lore.secret ? " secrets)" : " lore)");
+                events.push_back(e);
+                SyncZone(player, state, defs, *zone, false, events);
+            }
+            if (any)
+                SyncLore(player, state, defs, true, events);
+        }
+
         void FinishReset(PlayerState& state)
         {
             if (!state.resync)
@@ -416,6 +501,15 @@ namespace Azc
                 } while (result->NextRow());
             }
             if (std::unique_ptr<QueryResult> result{ CharacterDatabase.PQuery(
+                "SELECT `kind`, `count`, `claimed_at`, `reward_text`, `reward_extra`, `reward_items` FROM `azcomp_character_lore` WHERE `guid` = %u", state.guid) })
+            {
+                do
+                {
+                    Field* f = result->Fetch();
+                    state.loreClaims[{ f[0].GetUInt8(), f[1].GetUInt32() }] = Claim{ time_t(f[2].GetUInt64()), { f[3].GetCppString(), f[4].GetCppString(), f[5].GetCppString() } };
+                } while (result->NextRow());
+            }
+            if (std::unique_ptr<QueryResult> result{ CharacterDatabase.PQuery(
                 "SELECT `zone_id`, `percent`, `reward_text`, `reward_extra`, `reward_items` FROM `azcomp_character_milestone` WHERE `guid` = %u", state.guid) })
             {
                 do
@@ -440,6 +534,7 @@ namespace Azc
             case SOURCE_QUEST:   return "quest";
             case SOURCE_TAXI:    return "taxi";
             case SOURCE_ADMIN:   return "admin";
+            case SOURCE_LORE:    return "lore";
             default:             return "unknown";
         }
     }
@@ -460,6 +555,37 @@ namespace Azc
     uint8 PlayerTeamMask(Player const* player)
     {
         return player->GetTeam() == ALLIANCE ? TEAM_MASK_ALLIANCE : TEAM_MASK_HORDE;
+    }
+
+    bool IsNearLore(LoreObjective const& lore, uint32 map, float x, float y, float z, float range)
+    {
+        // Measured to the object's centre, so a big monument is found from further away.
+        range *= lore.scale;
+        for (Point const& p : lore.spawns)
+        {
+            float dx = p.x - x, dy = p.y - y, dz = p.z - z;
+            if (p.map == map && dx * dx + dy * dy + dz * dz <= range * range)
+                return true;
+        }
+        return false;
+    }
+
+    std::array<uint32, LORE_KIND_COUNT> LoreFound(PlayerState const& state, Definitions const& defs)
+    {
+        std::array<uint32, LORE_KIND_COUNT> found = { { 0, 0 } };
+        for (auto const& r : state.records)
+        {
+            if (Category(r.first >> 32) != CAT_LORE)
+                continue;
+            ++found[LORE_KIND_ANY];
+            // A found object stays found, even when a later generation drops it.
+            auto ref = defs.loreByKey.find(uint32(r.first & 0xFFFFFFFF));
+            if (ref != defs.loreByKey.end())
+                if (ZoneDef const* zone = defs.FindZone(ref->second.zoneId))
+                    if (zone->lore[ref->second.index].secret)
+                        ++found[LORE_KIND_SECRET];
+        }
+        return found;
     }
 
     QuestEval EvaluateQuest(Player* player, QuestNode const& node)
@@ -765,6 +891,20 @@ namespace Azc
             add(CAT_TRAVEL, obj);
         }
 
+        for (uint32 i = 0; i < zone.lore.size(); ++i)
+        {
+            LoreObjective const& l = zone.lore[i];
+            ObjectiveEval obj;
+            obj.cat = CAT_LORE;
+            obj.key = l.key;
+            obj.index = i;
+            obj.name = l.name;
+            obj.bonus = l.bonus;
+            add(CAT_LORE, obj);
+            ObjectiveEval& added = ev.cats[CAT_LORE].objectives.back();
+            added.hidden = l.secret && !added.done && cfg.hiddenInfo < 2;
+        }
+
         // Weights: hidden (empty) categories give theirs to the others proportionally.
         uint32 weightSum = 0;
         for (uint8 c = 0; c < CAT_COUNT; ++c)
@@ -901,6 +1041,7 @@ namespace Azc
         SyncAll(player, s, *defs, true, events, allowRewards);   // retroactive: explored areas, rewarded quests, known flight paths
         s.regionCheck = true;       // regions added since the last login, or zones completed before them
         SyncRegions(player, s, *defs, allowRewards, events);
+        SyncLore(player, s, *defs, allowRewards, events);     // tiers added since the last login
         FinishReset(s);
         s.generation = defs->generation;
         s.exploredSig = ExploredSignature(player);
@@ -937,6 +1078,7 @@ namespace Azc
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_zone` WHERE `guid` = %u", guidLow);
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u", guidLow);
         CharacterDatabase.PExecute("DELETE FROM `azcomp_character_region` WHERE `guid` = %u", guidLow);
+        CharacterDatabase.PExecute("DELETE FROM `azcomp_character_lore` WHERE `guid` = %u", guidLow);
     }
 
     void ProgressOnUpdate(Player* player, uint32 diff)
@@ -982,6 +1124,7 @@ namespace Azc
             SyncAll(player, *state, *defs, true, events, allowRewards);
             state->regionCheck = true;      // the regions may have changed too
             SyncRegions(player, *state, *defs, allowRewards, events);
+            SyncLore(player, *state, *defs, allowRewards, events);
             FinishReset(*state);
             state->generation = defs->generation;
             Event e;
@@ -1039,6 +1182,7 @@ namespace Azc
         for (uint32 z : zones)
             if (ZoneDef const* zone = defs->FindZone(z))
                 SyncZone(player, *state, *defs, *zone, false, events);
+        FindLore(player, *state, *defs, events);
         SyncRegions(player, *state, *defs, true, events);
 
         DeliverEvents(player, *state, events);
@@ -1132,6 +1276,7 @@ namespace Azc
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_zone` WHERE `guid` = %u", guidLow);
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_milestone` WHERE `guid` = %u", guidLow);
             // A one-zone reset keeps completed regions (they are never taken away); a full reset does not.
+            // Lore count claims stay either way: found lore cannot be rebuilt, so they must not pay twice.
             CharacterDatabase.PExecute("DELETE FROM `azcomp_character_region` WHERE `guid` = %u", guidLow);
         }
 

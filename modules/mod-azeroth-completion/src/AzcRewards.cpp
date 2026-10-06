@@ -38,6 +38,7 @@ namespace Azc
         std::mutex rewardsMutex;
         std::vector<RewardRow> rows;
         std::vector<RewardRow> regionRows;     // zoneId holds the region id
+        std::vector<RewardRow> loreRows;       // zoneId holds the lore kind, percent the count
         std::map<std::string, AzerothCompletion::RewardHook> hooks;
 
         std::string Money(uint32 copper)
@@ -78,6 +79,16 @@ namespace Azc
             std::vector<RewardRow> out;
             for (RewardRow const& row : regionRows)
                 if (row.zoneId == regionId)
+                    out.push_back(row);
+            return out;
+        }
+
+        std::vector<RewardRow> RowsForLore(LoreKind kind, uint32 count)
+        {
+            std::lock_guard<std::mutex> lock(rewardsMutex);
+            std::vector<RewardRow> out;
+            for (RewardRow const& row : loreRows)
+                if (row.zoneId == kind && row.percent == count)
                     out.push_back(row);
             return out;
         }
@@ -196,7 +207,8 @@ namespace Azc
                         sLog.outError("[mod-azeroth-completion] Reward hook '%s' is not registered.", row.text.c_str());
                     return "";
                 }
-                // A region reward calls the hook with zone 0 and the region id as "percent".
+                // A region reward calls the hook with zone 0 and the region id as "percent",
+                // a lore reward with zone 0 and the count.
                 if (grant)
                     hook(player, ctx.zoneId, ctx.regionId ? ctx.regionId : ctx.percent);
                 return "";
@@ -242,6 +254,15 @@ namespace Azc
             ctx.mailBody = region.name + " completion reward.";
             return Run(player, ctx, RowsForRegion(region.id), grant);
         }
+
+        RewardSummary RunLore(Player* player, LoreKind kind, uint32 count, bool grant)
+        {
+            RewardContext ctx;
+            ctx.percent = count;
+            ctx.levelMax = player->GetLevel();
+            ctx.mailBody = std::string(kind == LORE_KIND_SECRET ? "Secrets" : "Lore") + " reward: " + std::to_string(count) + " found.";
+            return Run(player, ctx, RowsForLore(kind, count), grant);
+        }
     }
 
     void LoadRewards()
@@ -282,15 +303,35 @@ namespace Azc
                 loadedRegion.push_back(row);
             } while (result->NextRow());
         }
+        std::vector<RewardRow> loadedLore;
+        if (std::unique_ptr<QueryResult> result{ WorldDatabase.Query(
+            "SELECT `kind`, `count`, `reward_type`, `value1`, `value2`, `text` FROM `azcomp_lore_reward` ORDER BY `id`") })
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                RewardRow row;
+                row.zoneId = f[0].GetUInt32();
+                row.percent = f[1].GetUInt32();
+                row.type = f[2].GetCppString();
+                std::transform(row.type.begin(), row.type.end(), row.type.begin(), ::toupper);
+                row.value1 = f[3].GetInt32();
+                row.value2 = f[4].GetInt32();
+                row.text = f[5].GetCppString();
+                if (row.zoneId < LORE_KIND_COUNT && row.percent > 0)
+                    loadedLore.push_back(row);
+            } while (result->NextRow());
+        }
         std::lock_guard<std::mutex> lock(rewardsMutex);
         rows = std::move(loaded);
         regionRows = std::move(loadedRegion);
+        loreRows = std::move(loadedLore);
     }
 
     uint32 RewardRowCount()
     {
         std::lock_guard<std::mutex> lock(rewardsMutex);
-        return uint32(rows.size() + regionRows.size());
+        return uint32(rows.size() + regionRows.size() + loreRows.size());
     }
 
     RewardSummary GrantMilestoneRewards(Player* player, ZoneDef const& zone, uint32 percent)
@@ -311,6 +352,28 @@ namespace Azc
     RewardSummary DescribeRegionRewards(Player* player, RegionDef const& region)
     {
         return RunRegion(player, region, false);
+    }
+
+    std::vector<uint32> LoreRewardCounts(LoreKind kind)
+    {
+        std::lock_guard<std::mutex> lock(rewardsMutex);
+        std::vector<uint32> counts;
+        for (RewardRow const& row : loreRows)
+            if (row.zoneId == kind)
+                counts.push_back(row.percent);
+        std::sort(counts.begin(), counts.end());
+        counts.erase(std::unique(counts.begin(), counts.end()), counts.end());
+        return counts;
+    }
+
+    RewardSummary GrantLoreRewards(Player* player, LoreKind kind, uint32 count)
+    {
+        return RunLore(player, kind, count, true);
+    }
+
+    RewardSummary DescribeLoreRewards(Player* player, LoreKind kind, uint32 count)
+    {
+        return RunLore(player, kind, count, false);
     }
 }
 

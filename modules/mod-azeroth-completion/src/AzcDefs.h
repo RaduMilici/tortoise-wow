@@ -31,6 +31,7 @@ namespace Azc
         CAT_RARE        = 2,
         CAT_ELITE       = 3,
         CAT_TRAVEL      = 4,
+        CAT_LORE        = 5,        // books, plaques and secrets: bonus unless Lore.Mandatory
         CAT_COUNT
     };
 
@@ -40,7 +41,7 @@ namespace Azc
     char const* CategoryEventName(Category cat);
     // "exploration", "storyline", ... - the prefix of an objective id ("rare:448").
     char const* ObjectivePrefix(Category cat);
-    // Display name: "Exploration", "Storylines", "Rare Hunts", "Elite Encounters", "Travel".
+    // Display name: "Exploration", "Storylines", "Rare Hunts", "Elite Encounters", "Travel", "Lore & Secrets".
     char const* CategoryTitle(Category cat);
     bool ParseCategory(std::string const& text, Category& out);
 
@@ -185,6 +186,31 @@ namespace Azc
         bool bonus = false;
     };
 
+    // A readable object (book, plaque, monument) of the zone. Every copy of the same object in
+    // the zone is one objective; the player finds it by walking up to any of them.
+    struct LoreObjective
+    {
+        uint32 key = 0;                 // lowest spawn guid of the object in the zone; objective id "lore:<key>"
+        uint32 entry = 0;               // gameobject entry (overrides use it)
+        std::string name;
+        std::string summary;            // first sentence of its text, shown once found
+        std::vector<Point> spawns;      // every copy in the zone
+        uint32 areaId = 0;              // area of the first copy
+        float scale = 1.0f;             // object size: big monuments are found from further away
+        bool secret = false;            // far from any town or service NPC: hidden until found
+        std::string hint;               // from azcomp_override
+        bool bonus = true;
+        std::string bonusReason;
+    };
+
+    // Kinds of lore count rewards (azcomp_lore_reward.kind).
+    enum LoreKind : uint8
+    {
+        LORE_KIND_ANY    = 0,           // every lore objective found
+        LORE_KIND_SECRET = 1,           // secrets found
+        LORE_KIND_COUNT
+    };
+
     struct ZoneDef
     {
         uint32 zoneId = 0;
@@ -199,6 +225,7 @@ namespace Azc
         std::vector<CreatureObjective> rares;
         std::vector<CreatureObjective> elites;
         std::vector<TravelObjective> travel;
+        std::vector<LoreObjective> lore;
         std::vector<Exclusion> excluded;
     };
 
@@ -244,6 +271,8 @@ namespace Azc
         std::unordered_map<uint32, ObjectiveRef> rareByEntry;
         std::unordered_map<uint32, ObjectiveRef> eliteByEntry;
         std::unordered_map<uint32, ObjectiveRef> travelByNode;
+        std::unordered_map<uint32, ObjectiveRef> loreByKey;
+        std::array<uint32, LORE_KIND_COUNT> loreTotals = { { 0, 0 } };   // objectives of each kind in the world
         std::unordered_map<uint32, uint32> zoneOfArea;  // every area id -> top zone id
         std::unordered_map<uint32, std::string> areaNames;
 
@@ -283,7 +312,7 @@ namespace Azc
     {
         bool enabled = true;
         std::set<uint32> maps = { 0, 1 };
-        std::array<uint32, CAT_COUNT> weights = { { 30, 30, 15, 15, 10 } };
+        std::array<uint32, CAT_COUNT> weights = { { 30, 30, 15, 15, 10, 10 } };
         uint32 syncIntervalMs = 2000;
         uint32 minExploreCells = 3;
         uint32 maxStorylineQuests = 40;
@@ -291,6 +320,9 @@ namespace Azc
         uint32 eliteMaxSpawns = 2;
         uint32 eliteMinScore = 4;
         bool worldBossesMandatory = false;
+        bool loreMandatory = false;     // lore counts towards the zone (secrets never do)
+        float loreRange = 6.0f;         // yards from a lore object that count as finding it
+        float secretDistance = 100.0f;  // a lore object this far from any service NPC is a secret
         uint32 hiddenInfo = 1;          // 0 strip, 1 send with hidden flag, 2 reveal
         bool exposeRespawn = true;
         bool exposeLoot = true;

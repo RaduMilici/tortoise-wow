@@ -102,7 +102,12 @@ namespace Azc
             {
                 CategoryEval const& ce = ev.cats[c];
                 if (!ce.visible)
+                {
+                    // Lore is usually extra only: show what was found anyway.
+                    if (c == CAT_LORE && ce.bonusTotal)
+                        handler->PSendSysMessage("  %-18s %u / %u (bonus)", CategoryTitle(Category(c)), ce.bonusDone, ce.bonusTotal);
                     continue;
+                }
                 std::string bonus = ce.bonusTotal ? "  (+" + std::to_string(ce.bonusDone) + "/" + std::to_string(ce.bonusTotal) + " bonus)" : "";
                 handler->PSendSysMessage("  %-18s %u / %u%s", CategoryTitle(Category(c)), ce.done, ce.total, bonus.c_str());
             }
@@ -239,6 +244,53 @@ namespace Azc
         return true;
     }
 
+    bool HandleAcLore(ChatHandler* handler, char* args)
+    {
+        Player* player = Self(handler);
+        DefinitionsPtr defs = RequireDefs(handler);
+        if (!player || !defs)
+            return true;
+        std::string text = Trim(args);
+        ZoneDef const* zone = text.empty() ? defs->FindZone(player->GetZoneId()) : FindZoneArg(handler, *defs, text);
+        if (!text.empty() && !zone)
+            return true;
+        WithState(player, [&](PlayerState* state)
+        {
+            if (!state)
+                return;
+            std::array<uint32, LORE_KIND_COUNT> found = LoreFound(*state, *defs);
+            handler->PSendSysMessage("|cffffd100Lore & Secrets|r: %u / %u lore objects found, %u / %u secrets.",
+                found[LORE_KIND_ANY], defs->loreTotals[LORE_KIND_ANY], found[LORE_KIND_SECRET], defs->loreTotals[LORE_KIND_SECRET]);
+            for (uint8 k = 0; k < LORE_KIND_COUNT; ++k)
+                for (uint32 count : LoreRewardCounts(LoreKind(k)))
+                {
+                    bool got = state->loreClaims.count({ k, count }) != 0;
+                    RewardSummary reward = got ? state->loreClaims.at({ k, count }).reward : DescribeLoreRewards(player, LoreKind(k), count);
+                    handler->PSendSysMessage("  %s%3u %s|r%s%s", got ? "|cffffd100" : "|cffffffff", count, k == LORE_KIND_SECRET ? "secrets" : "lore",
+                        got ? " - reached" : "", reward.text.empty() ? "" : (": " + reward.text).c_str());
+                }
+            if (!zone || zone->lore.empty())
+            {
+                handler->SendSysMessage(zone ? "There is no lore to find in this zone." : "This zone has no completion checklist.");
+                return;
+            }
+            uint32 hiddenLeft = 0;
+            std::string left;
+            for (LoreObjective const& l : zone->lore)
+            {
+                if (state->Find(CAT_LORE, l.key))
+                    continue;
+                if (l.secret && GetConfig().hiddenInfo < 2)
+                    ++hiddenLeft;
+                else
+                    left += (left.empty() ? "" : ", ") + l.name + (l.areaId ? " (" + defs->AreaName(l.areaId) + ")" : "");
+            }
+            handler->PSendSysMessage("%s: %s%s", zone->name.c_str(), left.empty() ? "nothing left to read" : ("still to read: " + left).c_str(),
+                hiddenLeft ? (", and " + std::to_string(hiddenLeft) + " secret(s) somewhere").c_str() : "");
+        });
+        return true;
+    }
+
     bool HandleAcSuggest(ChatHandler* handler, char* /*args*/)
     {
         Player* player = Self(handler);
@@ -284,9 +336,11 @@ namespace Azc
             counts[CAT_RARE] += uint32(pair.second.rares.size());
             counts[CAT_ELITE] += uint32(pair.second.elites.size());
             counts[CAT_TRAVEL] += uint32(pair.second.travel.size());
+            counts[CAT_LORE] += uint32(pair.second.lore.size());
         }
-        handler->PSendSysMessage("Generation %u: %u zones, %u exploration, %u storylines (%u quests), %u rares, %u elites, %u flight paths.",
-            defs->generation, uint32(defs->zones.size()), counts[0], counts[1], uint32(defs->quests.size()), counts[2], counts[3], counts[4]);
+        handler->PSendSysMessage("Generation %u: %u zones, %u exploration, %u storylines (%u quests), %u rares, %u elites, %u flight paths, %u lore (%u secrets).",
+            defs->generation, uint32(defs->zones.size()), counts[0], counts[1], uint32(defs->quests.size()), counts[2], counts[3], counts[4],
+            counts[CAT_LORE], defs->loreTotals[LORE_KIND_SECRET]);
         for (std::string const& line : defs->globalLog)
             handler->PSendSysMessage("  %s", line.c_str());
         handler->PSendSysMessage("Regions: %u. Tracked characters online: %u. Reward rows: %u.", uint32(defs->regions.size()), ProgressTrackedPlayers(), RewardRowCount());
@@ -321,6 +375,8 @@ namespace Azc
             names(zone->elites, [](CreatureObjective const& c) { return c.name + "(" + std::to_string(c.importance) + ")" + (c.bonus ? "*" : ""); }).c_str());
         handler->PSendSysMessage("%u travel: %s", uint32(zone->travel.size()),
             names(zone->travel, [](TravelObjective const& t) { return t.name + (t.bonus ? "*" : ""); }).c_str());
+        handler->PSendSysMessage("%u lore: %s", uint32(zone->lore.size()),
+            names(zone->lore, [](LoreObjective const& l) { return l.name + "[" + std::to_string(l.key) + "]" + (l.secret ? "(secret)" : "") + (l.bonus ? "*" : ""); }).c_str());
         handler->SendSysMessage("(* = bonus, never required)");
 
         std::map<std::string, std::vector<std::string>> excluded;
@@ -425,19 +481,19 @@ namespace Azc
         uint32 key;
         if (!ParseObjectiveId(text, cat, key))
         {
-            handler->SendSysMessage("Usage: .ac inspect-objective <exploration:area_20|storyline:65|rare:520|elite:448|travel:4>");
+            handler->SendSysMessage("Usage: .ac inspect-objective <exploration:area_20|storyline:65|rare:520|elite:448|travel:4|lore:12345>");
             return true;
         }
         if (cat == CAT_STORYLINE)
             return HandleAcInspectStory(handler, args);
 
         std::unordered_map<uint32, ObjectiveRef> const& map = cat == CAT_EXPLORATION ? defs->explorationByArea : cat == CAT_RARE ? defs->rareByEntry
-            : cat == CAT_ELITE ? defs->eliteByEntry : defs->travelByNode;
+            : cat == CAT_ELITE ? defs->eliteByEntry : cat == CAT_LORE ? defs->loreByKey : defs->travelByNode;
         auto itr = map.find(key);
         ZoneDef const* zone = itr == map.end() ? nullptr : defs->FindZone(itr->second.zoneId);
         if (!zone)
         {
-            // maybe it was excluded: say why
+            // maybe it was excluded: say why (lore exclusions are kept by object entry)
             for (auto const& pair : defs->zones)
                 for (Exclusion const& e : pair.second.excluded)
                     if (e.cat == cat && e.key == key)
@@ -473,6 +529,17 @@ namespace Azc
                     signals.c_str(), c.bonus ? (", bonus: " + c.bonusReason).c_str() : "");
                 for (Point const& p : c.spawns)
                     handler->PSendSysMessage("  spawn: map %u %.1f %.1f %.1f", p.map, p.x, p.y, p.z);
+                break;
+            }
+            case CAT_LORE:
+            {
+                LoreObjective const& l = zone->lore[index];
+                handler->PSendSysMessage("%s: %s (object %u) in %s, %u cop%s%s%s", text.c_str(), l.name.c_str(), l.entry, zone->name.c_str(),
+                    uint32(l.spawns.size()), l.spawns.size() == 1 ? "y" : "ies", l.secret ? ", secret" : "", l.bonus ? (", bonus: " + l.bonusReason).c_str() : "");
+                for (Point const& p : l.spawns)
+                    handler->PSendSysMessage("  at: map %u %.1f %.1f %.1f", p.map, p.x, p.y, p.z);
+                if (!l.summary.empty())
+                    handler->PSendSysMessage("  \"%s\"", l.summary.c_str());
                 break;
             }
             case CAT_TRAVEL:
@@ -572,6 +639,7 @@ namespace Azc
             { "progress",          SEC_PLAYER,        false, nullptr, "Your most complete zones", nullptr, 0, "", 0, &HandleAcProgress },
             { "suggest",           SEC_PLAYER,        false, nullptr, "Nearby objectives you can do now", nullptr, 0, "", 0, &HandleAcSuggest },
             { "regions",           SEC_PLAYER,        false, nullptr, "Your progress in every region", nullptr, 0, "", 0, &HandleAcRegions },
+            { "lore",              SEC_PLAYER,        false, nullptr, "Lore and secrets found, and what is left here: .ac lore [zone]", nullptr, 0, "", 0, &HandleAcLore },
             { "status",            SEC_MODERATOR,     true,  nullptr, "Generator status and totals", nullptr, 0, "", 0, &HandleAcStatus },
             { "inspect",           SEC_MODERATOR,     true,  nullptr, "Generated checklist of a zone, with exclusions: .ac inspect <zone>", nullptr, 0, "", 0, &HandleAcInspect },
             { "inspect-story",     SEC_MODERATOR,     false, nullptr, "Quest graph of a storyline: .ac inspect-story <id>", nullptr, 0, "", 0, &HandleAcInspectStory },

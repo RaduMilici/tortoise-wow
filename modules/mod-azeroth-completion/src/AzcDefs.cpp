@@ -51,6 +51,7 @@ namespace Azc
             case CAT_RARE:        return "rares";
             case CAT_ELITE:       return "elites";
             case CAT_TRAVEL:      return "travel";
+            case CAT_LORE:        return "lore";
             default:              return "unknown";
         }
     }
@@ -64,6 +65,7 @@ namespace Azc
             case CAT_RARE:        return "RARE";
             case CAT_ELITE:       return "ELITE";
             case CAT_TRAVEL:      return "TRAVEL";
+            case CAT_LORE:        return "LORE";
             default:              return "UNKNOWN";
         }
     }
@@ -77,6 +79,7 @@ namespace Azc
             case CAT_RARE:        return "rare";
             case CAT_ELITE:       return "elite";
             case CAT_TRAVEL:      return "travel";
+            case CAT_LORE:        return "lore";
             default:              return "unknown";
         }
     }
@@ -90,6 +93,7 @@ namespace Azc
             case CAT_RARE:        return "Rare Hunts";
             case CAT_ELITE:       return "Elite Encounters";
             case CAT_TRAVEL:      return "Travel";
+            case CAT_LORE:        return "Lore & Secrets";
             default:              return "Unknown";
         }
     }
@@ -159,6 +163,7 @@ namespace Azc
         c.weights[CAT_RARE]        = UIntDefault("AzerothCompletion.Weight.Rares", 15);
         c.weights[CAT_ELITE]       = UIntDefault("AzerothCompletion.Weight.Elites", 15);
         c.weights[CAT_TRAVEL]      = UIntDefault("AzerothCompletion.Weight.Travel", 10);
+        c.weights[CAT_LORE]        = UIntDefault("AzerothCompletion.Weight.Lore", 10);
 
         c.syncIntervalMs        = std::max<uint32>(500, UIntDefault("AzerothCompletion.SyncIntervalMs", 2000));
         c.minExploreCells       = UIntDefault("AzerothCompletion.Exploration.MinTerrainCells", 3);
@@ -167,6 +172,9 @@ namespace Azc
         c.eliteMaxSpawns        = UIntDefault("AzerothCompletion.Elites.MaxSpawns", 2);
         c.eliteMinScore         = UIntDefault("AzerothCompletion.Elites.MinScore", 4);
         c.worldBossesMandatory  = sConfig.GetBoolDefault("AzerothCompletion.Elites.WorldBossesMandatory", false);
+        c.loreMandatory         = sConfig.GetBoolDefault("AzerothCompletion.Lore.Mandatory", false);
+        c.loreRange             = std::max(2.0f, sConfig.GetFloatDefault("AzerothCompletion.Lore.Range", 6.0f));
+        c.secretDistance        = sConfig.GetFloatDefault("AzerothCompletion.Lore.SecretDistance", 100.0f);
         c.hiddenInfo            = std::min<uint32>(2, UIntDefault("AzerothCompletion.HiddenInfo", 1));
         c.exposeRespawn         = sConfig.GetBoolDefault("AzerothCompletion.Rares.ExposeRespawn", true);
         c.exposeLoot            = sConfig.GetBoolDefault("AzerothCompletion.Rares.ExposeLoot", true);
