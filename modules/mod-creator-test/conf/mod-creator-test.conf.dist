@@ -1,3 +1,9 @@
 [ModuleConf]
 # Disabled on ordinary servers. Noggit's managed loopback runtime enables it.
 CreatorTest.Enable = 0
+
+# Independent of CreatorTest.Enable: authenticated console/SOAP character operations.
+# Enable only after configuring Forge's SSH command bridge. Never expose SOAP publicly.
+ForgeCharacters.Enable = 0
+# Use an absolute, persistent directory owned by the server user; relative paths follow the working directory.
+ForgeCharacters.AuditDirectory = "forge-characters-audit"

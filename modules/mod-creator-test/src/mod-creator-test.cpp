@@ -65,4 +65,5 @@ public:
     }
 };
 }
-void Addmod_creator_testScripts() { new CreatorWorld();new CreatorPlayer(); }
+void AddForgeCharacterScripts();
+void Addmod_creator_testScripts() { new CreatorWorld();new CreatorPlayer(); AddForgeCharacterScripts(); }

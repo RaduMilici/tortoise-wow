@@ -165,6 +165,8 @@ class SqlQueryHolder
         void SetResult(size_t index, QueryResult *result);
         bool Execute(MaNGOS::IQueryCallback * callback, Database *db, SqlResultQueue *queue);
         void DeleteAllResults();
+        // World-thread administrative offline loads. Never registers a login or session.
+        void ExecuteSynchronous(Database& db);
         uint32 GetSerialId() const { return serialId; }
 };
 

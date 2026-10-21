@@ -54,7 +54,8 @@ enum CinematicsSkipMode
 namespace CharacterCreation
 {
 
-CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo const& info)
+CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo const& info,
+    std::function<bool(Player&)> const& prepare, bool directSave)
 {
     CharacterCreateOutcome outcome;
     outcome.result = CHAR_CREATE_ERROR;
@@ -245,6 +246,10 @@ CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo con
     MasterPlayer masterPlayer(&dummySession);
     masterPlayer.Create(pNewChar.get());
 
+    // Administrative customization happens before the first save and before cache publication.
+    if (prepare && !prepare(*pNewChar))
+        return outcome;
+
     if ((haveSameRace && skipCinematics == CINEMATICS_SKIP_SAME_RACE) || skipCinematics == CINEMATICS_SKIP_ALL)
         pNewChar->SetCinematic(1);
 
@@ -253,7 +258,7 @@ CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo con
     if (info.challengeMask)
         pNewChar->SetPlayerVariable(PlayerVariables::PendingChallengeMask, std::to_string(info.challengeMask));
 
-    if (!pNewChar->SaveToDB(false, true, false))
+    if (!pNewChar->SaveToDB(false, true, directSave))
     {
         outcome.result = CHAR_CREATE_ERROR;
         return outcome;

@@ -28,6 +28,13 @@
 
 #define LOCK_DB_CONN(conn) SqlConnection::Lock guard(conn)
 
+void SqlQueryHolder::ExecuteSynchronous(Database& db)
+{
+    for (size_t i = 0; i < m_queries.size(); ++i)
+        if (m_queries[i].first)
+            SetResult(i, db.Query(m_queries[i].first));
+}
+
 /// ---- ASYNC STATEMENTS / TRANSACTIONS ----
 
 bool SqlPlainRequest::Execute(SqlConnection *conn)

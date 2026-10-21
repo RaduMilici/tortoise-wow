@@ -25,6 +25,9 @@
 #include "ObjectGuid.h"
 #include "SharedDefines.h"
 #include <string>
+#include <functional>
+
+class Player;
 
 // Input bundle for synchronous character creation. Mirrors the data parsed from
 // CMSG_CHAR_CREATE (except packet framing). All validation is reused from the
@@ -88,7 +91,8 @@ namespace CharacterCreation
     // transient helper not registered in World nor tied to a network socket;
     // hooks must not assume FindSession/online/world presence and must handle
     // that the Player is valid only during the synchronous call.
-    CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo const& info);
+    CharacterCreateOutcome CreateCharacter(uint32 accountId, CharacterCreateInfo const& info,
+        std::function<bool(Player&)> const& prepare = {}, bool directSave = false);
 }
 
 // Compile-time contract: outcome result values must be the packet values.
