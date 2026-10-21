@@ -158,7 +158,9 @@ if [ "$build" = 1 ]; then
   build_start=$SECONDS
   (
     cd "$DEPLOY_DIR"
+    # The Dockerfile uses COPY --exclude, which older built-in Dockerfile parsers (Docker 26) reject.
     MSYS_NO_PATHCONV=1 docker build --progress=plain --platform linux/amd64 \
+      --build-arg BUILDKIT_SYNTAX=docker/dockerfile:1.7-labs \
       -f docker/server/Dockerfile \
       --build-arg TORTOISE_REPOSITORY_URL="$CORE_URL" \
       --build-arg TORTOISE_REVISION="$CORE_REVISION" \
@@ -170,7 +172,7 @@ if [ "$build" = 1 ]; then
       -t "$IMAGE" -t "tortoise-server:${CORE_REVISION:0:12}" .
   ) 2>&1 | tee "$BUILD_LOG" || {
     log "Last compiler errors:"
-    grep -E 'error:|Error [0-9]|FAILED' "$BUILD_LOG" | tail -20 | tee -a "$LOG"
+    grep -E 'error:|ERROR|Error [0-9]|FAILED' "$BUILD_LOG" | tail -20 | tee -a "$LOG"
     fail "Docker build failed after $(elapsed "$build_start"). Nothing was deployed."
   }
   log "Built $IMAGE in $(elapsed "$build_start") ($(docker image inspect -f '{{.Size}}' "$IMAGE" | awk '{printf "%.0f MB", $1 / 1048576}'))."
