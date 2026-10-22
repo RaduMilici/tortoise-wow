@@ -78,7 +78,8 @@ if [ "$build" = 1 ]; then
   # A Windows checkout (core.autocrlf=true) gives the container scripts CRLF endings, which breaks them in the image.
   git -C "$DEPLOY_DIR" config core.autocrlf false
   # Line-ending differences are discarded; any real local edit stops the script instead.
-  git -C "$DEPLOY_DIR" diff --ignore-cr-at-eol --quiet ||
+  # Staged edits too: the forced checkout below would discard them.
+  git -C "$DEPLOY_DIR" diff --ignore-cr-at-eol --quiet && git -C "$DEPLOY_DIR" diff --cached --ignore-cr-at-eol --quiet ||
     fail "tortoise-deploy has local edits beyond line endings. Commit or stash them in $DEPLOY_DIR first."
   [ -z "$(git -C "$DEPLOY_DIR" ls-files --others --exclude-standard)" ] ||
     log "Note: tortoise-deploy has untracked files; they are left alone (and are not copied into the image unless under docker/)."
@@ -154,6 +155,21 @@ fi
 if [ "$build" = 1 ]; then
   phase "Build $IMAGE from ${CORE_REVISION:0:12} (long: compiles the whole server)"
   BUILD_LOG="$WORK/build-${CORE_REVISION:0:12}.log"
+  # Upstream runs make -j"$(nproc)". With link-time optimisation each compiler takes 1-2 GB, so 16 at once
+  # exhaust Docker's VM and kill the build daemon. Build from a copy limited to what Docker's memory allows.
+  docker_cpus="$(docker info --format '{{.NCPU}}')"
+  docker_mem_gb="$(docker info --format '{{.MemTotal}}' | awk '{printf "%d", $1 / 1073741824}')"
+  jobs="${BUILD_JOBS:-$(( docker_mem_gb / 2 ))}"
+  [ "$jobs" -ge 1 ] || jobs=1
+  [ "$jobs" -le "$docker_cpus" ] || jobs="$docker_cpus"
+  log "Docker has $docker_cpus CPUs and ${docker_mem_gb} GB of memory: compiling with $jobs parallel jobs (override with BUILD_JOBS=N)."
+  [ "$docker_mem_gb" -ge 6 ] || log "WARNING: under 6 GB for Docker; the final link may still run out of memory. See the note printed on failure."
+  dockerfile="$WORK/Dockerfile.limited"
+  sed -e 's/make -j"$(nproc)"/make -j"${TORTOISE_BUILD_JOBS}"/' \
+      -e '/^FROM .* AS build$/a ARG TORTOISE_BUILD_JOBS=2' \
+      "$DEPLOY_DIR/docker/server/Dockerfile" > "$dockerfile"
+  grep -q 'make -j"${TORTOISE_BUILD_JOBS}"' "$dockerfile" && grep -q '^ARG TORTOISE_BUILD_JOBS' "$dockerfile" ||
+    fail "Could not limit the job count in the pinned Dockerfile (its make line changed)."
   log "Compiler output: $BUILD_LOG (also streamed here)"
   build_start=$SECONDS
   (
@@ -161,7 +177,8 @@ if [ "$build" = 1 ]; then
     # The Dockerfile uses COPY --exclude, which older built-in Dockerfile parsers (Docker 26) reject.
     MSYS_NO_PATHCONV=1 docker build --progress=plain --platform linux/amd64 \
       --build-arg BUILDKIT_SYNTAX=docker/dockerfile:1.7-labs \
-      -f docker/server/Dockerfile \
+      -f "$(cygpath -w "$dockerfile" 2>/dev/null || echo "$dockerfile")" \
+      --build-arg TORTOISE_BUILD_JOBS="$jobs" \
       --build-arg TORTOISE_REPOSITORY_URL="$CORE_URL" \
       --build-arg TORTOISE_REVISION="$CORE_REVISION" \
       --build-arg TORTOISE_MODULES="$MODULES" \
@@ -171,8 +188,19 @@ if [ "$build" = 1 ]; then
       --label "tortoise-wow.revision=$CORE_REVISION" \
       -t "$IMAGE" -t "tortoise-server:${CORE_REVISION:0:12}" .
   ) 2>&1 | tee "$BUILD_LOG" || {
-    log "Last compiler errors:"
-    grep -E 'error:|ERROR|Error [0-9]|FAILED' "$BUILD_LOG" | tail -20 | tee -a "$LOG"
+    if grep -qE 'error reading from server: EOF|rpc error: code = Unavailable|cannot allocate memory|Killed signal terminated' "$BUILD_LOG"; then
+      log "Docker ran out of memory (its build daemon or a compiler was killed); this is not a code error."
+      log "  Retry with fewer jobs:  BUILD_JOBS=2 bash deploy/build-and-deploy.sh --build-only"
+      log "  Or give WSL more memory in %UserProfile%\.wslconfig ([wsl2] memory=11GB, swap=8GB),"
+      log "  then run 'wsl --shutdown' in PowerShell and restart Docker Desktop."
+    else
+      log "Last compiler errors:"
+      # The RUN step's own command line is echoed on failure; skip it.
+      grep -E 'error:|Error [0-9]|FAILED:|undefined reference' "$BUILD_LOG" | grep -v '\] RUN ' | cut -c1-300 | tail -20 | tee -a "$LOG"
+      # The recipe's own checks (module configs, SQL, DBC hashes) fail after compiling: show its last words.
+      log "Last build output:"
+      grep -E '^#[0-9]+ [0-9.]+ ' "$BUILD_LOG" | grep -vE 'Installing:|Up-to-date:' | cut -c1-300 | tail -5 | tee -a "$LOG"
+    fi
     fail "Docker build failed after $(elapsed "$build_start"). Nothing was deployed."
   }
   log "Built $IMAGE in $(elapsed "$build_start") ($(docker image inspect -f '{{.Size}}' "$IMAGE" | awk '{printf "%.0f MB", $1 / 1048576}'))."
@@ -227,10 +255,14 @@ phase "Load the image and restart"
 remote "$REMOTE_DIR" <<'REMOTE' || fail "Deploy failed. See the server lines above; roll back with the command at the end of the log."
 set -euo pipefail
 cd "$HOME/$1"
-if docker image inspect tortoise-server:mine >/dev/null 2>&1; then
+# Keep the image mangosd runs now. After a failed deploy, :mine is the broken image while the
+# container may still run the good one; tagging :mine would overwrite the good rollback.
+running="$(docker inspect -f '{{.Image}}' "$(docker compose ps -q mangosd)" 2>/dev/null || true)"
+[ -n "$running" ] || running="$(docker image inspect -f '{{.Id}}' tortoise-server:mine 2>/dev/null || true)"
+if [ -n "$running" ]; then
   stamp="$(date +%Y%m%d-%H%M%S)"
-  docker tag tortoise-server:mine tortoise-server:rollback
-  docker tag tortoise-server:mine "tortoise-server:rollback-$stamp"
+  docker tag "$running" tortoise-server:rollback
+  docker tag "$running" "tortoise-server:rollback-$stamp"
   echo "Kept the running image as tortoise-server:rollback (and rollback-$stamp)."
 fi
 echo "Loading the new image (a minute or two)..."
@@ -265,11 +297,13 @@ since="$(cat /tmp/tortoise-deploy-since)"
 for i in $(seq 1 90); do
   state="$(docker compose ps -a --format '{{.State}}' mangosd)"
   logs="$(docker compose logs --no-color --since "$since" mangosd 2>&1)"
-  if printf '%s' "$logs" | grep -q 'SOAP: remote command interface bound'; then
-    echo "World server is up after $((i * 10)) s: $(printf '%s' "$logs" | grep 'SOAP: remote command' | tail -1 | sed 's/^.*| //')"
+  # Here-strings, not `printf | grep -q`: under pipefail grep's early exit kills printf (status 141)
+  # once the startup log outgrows the pipe buffer, and the match reads as a miss.
+  if grep -q 'SOAP: remote command interface bound' <<<"$logs"; then
+    echo "World server is up after $((i * 10)) s: $(grep 'SOAP: remote command' <<<"$logs" | tail -1 | sed 's/^.*| //')"
     break
   fi
-  if printf '%s' "$logs" | grep -q 'SOAP: could not bind'; then echo "SOAP could not bind."; exit 1; fi
+  if grep -q 'SOAP: could not bind' <<<"$logs"; then echo "SOAP could not bind."; exit 1; fi
   if [ "$state" != running ]; then
     echo "mangosd is '$state'. Last log lines:"; printf '%s\n' "$logs" | tail -40; exit 1
   fi
@@ -283,7 +317,7 @@ case "$listeners" in
   *127.0.0.1:7878*) ;;
   *) echo "SOAP is not published on 127.0.0.1:7878."; exit 1 ;;
 esac
-if printf '%s' "$listeners" | grep -qvE '^(127\.0\.0\.1:7878 ?)+$'; then
+if grep -qvE '^(127\.0\.0\.1:7878 ?)+$' <<<"$listeners"; then
   echo "DANGER: SOAP is reachable beyond loopback. Fix compose.override.yaml and run 'docker compose up -d' now."; exit 1
 fi
 if [ -x /usr/local/bin/forge-character-command ] && [ -r /etc/forge-character-command.env ]; then

@@ -18421,15 +18421,12 @@ bool Player::SaveToDB(bool online, bool force, bool direct)
     uberInsert.addUInt8(HasXPGainEnabled());
     uberInsert.addUInt32(m_extraBonusTalentCount);
     
-    if (direct)
+    // A failed row must not leave this thread's transaction open: later writes would join it and
+    // never commit, and the next BeginTransaction on this thread would fail.
+    if (!(direct ? uberInsert.DirectExecute() : uberInsert.Execute()))
     {
-        if (!uberInsert.DirectExecute())
-            return false;
-    }
-    else
-    {
-        if (!uberInsert.Execute())
-            return false;
+        CharacterDatabase.RollbackTransaction();
+        return false;
     }
 
     _SaveBGData();

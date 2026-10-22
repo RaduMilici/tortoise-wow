@@ -880,10 +880,13 @@ class ChatHandler
         bool HandleBanInfoHelper(uint32 accountid, char const* accountname);
         bool HandleUnBanHelper(BanMode mode, char* args);
         bool HandleMuteHistoryHelper(uint32 accountid, char const* accountname);
+    public:
+        // Also used by modules editing an offline player (mod-creator-test's forgecharacter).
         void HandleCharacterLevel(Player* player, ObjectGuid player_guid, uint32 oldlevel, uint32 newlevel);
+        void HandleLearnTrainerHelper(Player* player, TrainerSpellData const* tSpells);
+    protected:
         SkillLineEntry const* FindSkillLineEntryFromProfessionName(char* args, std::string& nameOut);
         void HandleLearnSkillRecipesHelper(Player* player,uint32 skill_id);
-        void HandleLearnTrainerHelper(Player* player, TrainerSpellData const* tSpells);
         bool HandleGoHelper(Player* _player, uint32 mapid, float x, float y, float const* zPtr = nullptr, float const* ortPtr = nullptr);
         bool HandleGetValueHelper(Object* target, uint32 field, char* typeStr);
         bool HandlerDebugModValueHelper(Object* target, uint32 field, char* typeStr, char* valStr);
